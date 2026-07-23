@@ -1,0 +1,187 @@
+<script>
+  /************************************************************
+   *  UTILS.JS - Pusat State & Kalkulasi Otomatis
+   ************************************************************/
+
+  (function initState(){
+    const base = {
+      user: null, cart: [], selectedCategory: 'Wisata',
+      editMode: false, editOrderId: null,
+      travelAgents: [], selectedTravelAgent: null,
+      summaryData: []
+    };
+    window.APP_STATE = window.APP_STATE || JSON.parse(JSON.stringify(base));
+  })();
+
+  function getState() {
+  if (!window.APP_STATE) {
+    window.APP_STATE = { user: null, cart: [], editMode: false };
+  }
+  return window.APP_STATE;
+}
+
+  /**
+   * FUNGSI UTAMA: Update Revenue & Sisa Pelunasan di UI
+   */
+  function updatePaymentSummaryUI() {
+    const S = getState();
+    const cart = S.cart || [];
+
+    // 1. Hitung Total Revenue dari Keranjang
+    const totalRevenue = cart.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
+
+    // 2. Ambil nilai DP dan Pelunasan dari Input
+    const dpVal = parseRupiahToNumber(document.getElementById('dp1')?.value);
+    const pelVal = parseRupiahToNumber(document.getElementById('pelunasan')?.value);
+
+    // 3. Hitung Sisa
+    const sisa = Math.max(totalRevenue - dpVal - pelVal, 0);
+
+    // 4. Render ke elemen readonly
+    const revEl = document.getElementById('revAuto');
+    const sisaEl = document.getElementById('sisaBayar');
+
+    if (revEl) revEl.value = formatRupiah(totalRevenue);
+    if (sisaEl) sisaEl.value = formatRupiah(sisa);
+  }
+
+  /**
+   * Hubungkan input DP & Pelunasan agar saat diketik langsung menghitung
+   */
+  function bindPaymentInputs() {
+    ['dp1', 'pelunasan'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        // Saat mengetik (realtime)
+        el.addEventListener('input', updatePaymentSummaryUI);
+        
+        // Saat selesai mengetik (format rupiah)
+        el.addEventListener('blur', function(e) {
+          const n = parseRupiahToNumber(e.target.value);
+          e.target.value = n > 0 ? formatRupiah(n) : '';
+          updatePaymentSummaryUI();
+        });
+      }
+    });
+  }
+
+ function toggleLoading(show, text) {
+  const loader = document.getElementById('globalLoader');
+  const txt = document.getElementById('loaderText');
+  
+  if (!loader) return;
+
+  if (show) {
+    loader.classList.remove('hidden');
+    // Cek dulu apakah elemen teksnya ada sebelum diisi
+    if (txt) {
+      txt.textContent = text || 'Memproses...';
+    }
+  } else {
+    loader.classList.add('hidden');
+  }
+}
+
+  function showToast(message, type) {
+    const toast = document.createElement('div');
+    toast.className = 'toast ' + type;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => { toast.remove(); }, 3000);
+  }
+
+  function formatRupiah(amount) {
+    return 'Rp ' + (Number(amount) || 0).toLocaleString('id-ID');
+  }
+
+  function parseRupiahToNumber(v) {
+  if (!v || v === "-") return 0; // Jika strip atau kosong, anggap 0
+  const digits = String(v).replace(/[^\d]/g, '');
+  return parseInt(digits, 10) || 0;
+}
+
+ function normalizeDate(v) {
+  if (!v) return '';
+  // Jika sudah string YYYY-MM-DD
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  
+  try {
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  } catch (e) {
+    return '';
+  }
+}
+
+function normalizeTime(v) {
+  if (!v) return '';
+  if (typeof v === 'string' && v.includes(':')) return v.slice(0, 5);
+  if (typeof v === 'number') {
+    const totalMin = Math.round(v * 24 * 60);
+    return String(Math.floor(totalMin/60)%24).padStart(2,'0') + ":" + String(totalMin%60).padStart(2,'0');
+  }
+  const d = new Date(v);
+  if (!isNaN(d.getTime())) {
+    return String(d.getHours()).padStart(2,'0') + ":" + String(d.getMinutes()).padStart(2,'0');
+  }
+  return '';
+}
+
+  function runServer() { return google.script.run; }
+
+  // Logika Travel Agent (Tetap sama seperti perbaikan sebelumnya)
+  function renderTravelAgentTable() {
+    const container = document.getElementById('travelAgentTableContainer');
+    if (!container) return;
+    const S = getState();
+    const agents = S.travelAgents || [];
+    const q = document.getElementById('travelAgentSearch').value.toLowerCase().trim();
+    const filtered = agents.filter(a => (String(a.kode||'').trim() !== "" && String(a.nama||'').trim() !== "") && (String(a.kode).toLowerCase().includes(q) || String(a.nama).toLowerCase().includes(q)));
+    if (filtered.length === 0) { container.innerHTML = '<p style="font-size:12px;color:#999;padding:15px;text-align:center;">Data tidak ditemukan.</p>'; return; }
+    let html = '<div class="scrollable-table-container"><table style="width:100%; border-collapse:collapse;"><thead><tr><th style="padding:12px 10px;">KODE</th><th style="padding:12px 10px;">NAMA TRAVEL AGENT</th><th style="padding:12px 10px;">REGIONAL</th><th style="padding:12px 10px; text-align:center;">AKSI</th></tr></thead><tbody>';
+    filtered.forEach((a, index) => {
+      const isSelected = S.selectedTravelAgent && S.selectedTravelAgent.kode === a.kode;
+      html += `<tr style="background:${isSelected ? '#eff6ff' : (index % 2 === 0 ? 'white' : '#f9fafb')}; border-bottom: 1px solid #e5e7eb;">
+        <td style="padding:12px 10px; font-weight:500;">${a.kode}</td>
+        <td style="padding:12px 10px; white-space: normal;">${a.nama}</td>
+        <td style="padding:12px 10px; color:#64748b;">${a.regional || '-'}</td>
+        <td style="padding:12px 10px; text-align:center;">
+          ${isSelected ? '<span style="color:#2563eb; font-weight:700; font-size:12px;">✓ Dipilih</span>' : 
+          `<button type="button" onclick="selectTravelAgent('${a.kode.replace(/'/g, "\\'")}', '${a.nama.replace(/'/g, "\\'")}')" style="background:#2563eb; color:white; border:none; padding:6px 15px; border-radius:6px; cursor:pointer; font-weight:600; font-size:12px;">Pilih</button>`}
+        </td></tr>`;
+    });
+    container.innerHTML = html + '</tbody></table></div>';
+  }
+
+  function selectTravelAgent(kode, nama) { getState().selectedTravelAgent = { kode, nama }; renderTravelAgentTable(); showToast('Travel Agent dipilih', 'ok'); }
+  function loadTravelAgents() { runServer().withSuccessHandler(res => { getState().travelAgents = res || []; renderTravelAgentTable(); }).listTravelAgents(); }
+  function toggleTravelAgentSection() { 
+    const isChecked = document.getElementById('isTravelAgent').checked;
+    document.getElementById('travelAgentSection').className = isChecked ? '' : 'hidden';
+    if (!isChecked) getState().selectedTravelAgent = null; else renderTravelAgentTable();
+  }
+  function filterTravelAgentTable() { renderTravelAgentTable(); }
+  function getEstateAllowedByRegional_(regional) {
+    const r = String(regional || '').toLowerCase().trim();
+    const map = { 'regional 1': ['CES 1','CES 2','CES 5','CES 7','CES 8','CES 10'], 'regional 2': ['CES 3','CES 6'], 'regional 3': ['CES 4'], 'regional 4': ['CES 9'] };
+    return map[r] || ['CES 1','CES 2','CES 3','CES 4','CES 5','CES 6','CES 7','CES 8','CES 9','CES 10'];
+  }
+  function canInputRole_(jabatan) {
+    const j = String(jabatan || '').toLowerCase().trim();
+    return (j === 'sales' || j === 'telemarketing');
+  }
+  // Tambahan agar input harga manual langsung berformat Rupiah saat Sales selesai mengetik
+document.addEventListener('DOMContentLoaded', () => {
+  const hargaManualEl = document.getElementById('prodHarga');
+  if (hargaManualEl) {
+    hargaManualEl.addEventListener('blur', function(e) {
+      const n = parseRupiahToNumber(e.target.value);
+      e.target.value = n > 0 ? formatRupiah(n) : (n === 0 ? "Rp 0" : "");
+    });
+  }
+});
+</script>

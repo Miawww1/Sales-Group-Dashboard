@@ -1,0 +1,70 @@
+<script>
+  /************************************************************
+   *  CATALOG.JS - Support Harga Free (-) jadi 0
+   ************************************************************/
+
+  function switchCategory(category, btn) {
+    getState().selectedCategory = category;
+    document.querySelectorAll('.tab-btn').forEach(tab => tab.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    loadCatalog();
+  }
+
+  function loadCatalog() {
+    const estate = document.getElementById('estate').value;
+    const category = getState().selectedCategory || 'Wisata';
+    const produkSelect = document.getElementById('produkSelect');
+    if (!estate) {
+      produkSelect.innerHTML = '<option value="">Pilih Estate dulu</option>';
+      return;
+    }
+
+    toggleLoading(true, 'Memuat produk...');
+    runServer()
+      .withSuccessHandler(function(items) {
+        toggleLoading(false);
+        produkSelect.innerHTML = '<option value="">Pilih Produk</option>';
+        if (items && items.length > 0) {
+          items.forEach(item => {
+            const opt = document.createElement('option');
+            opt.value = item.kode;
+            opt.textContent = item.nama;
+            opt.dataset.harga = item.harga;
+            opt.dataset.kode = item.kode;
+            produkSelect.appendChild(opt);
+          });
+        } else {
+          produkSelect.innerHTML = '<option value="">Tidak ada produk</option>';
+        }
+      })
+      .withFailureHandler(err => { toggleLoading(false); showToast('Gagal muat', 'err'); })
+      .listCatalog(category, estate);
+  }
+
+  document.getElementById('produkSelect').addEventListener('change', function() {
+    const selected = this.options[this.selectedIndex];
+    const hargaInput = document.getElementById('prodHarga');
+    const kodeInput = document.getElementById('kodeProduk');
+
+    if (selected && selected.value) {
+      let hargaDb = String(selected.dataset.harga || '').trim();
+      kodeInput.value = selected.dataset.kode;
+
+      // JIKA HARGA ADALAH STRIP (-) ATAU 0 ATAU KOSONG
+      if (hargaDb === "-" || hargaDb === "0" || hargaDb === "") {
+        hargaInput.removeAttribute('readonly');
+        hargaInput.value = "0"; // Otomatis set 0
+        hargaInput.style.background = "#ffffff"; 
+        hargaInput.placeholder = "Masukkan harga atau biarkan 0...";
+      } else {
+        hargaInput.setAttribute('readonly', true);
+        hargaInput.value = formatRupiah(hargaDb);
+        hargaInput.style.background = "#f3f4f6";
+      }
+    } else {
+      kodeInput.value = '';
+      hargaInput.value = '';
+      hargaInput.setAttribute('readonly', true);
+    }
+  });
+</script>

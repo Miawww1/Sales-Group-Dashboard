@@ -1,0 +1,256 @@
+<script>/************************************************************
+ *  FORMHANDLER.JS - Manajemen Form & Pengiriman Data
+ *  (Full Version - Support Manager Edit Access)
+ ************************************************************/
+
+/**
+ * Inisialisasi awal saat Dashboard terbuka
+ */
+function initializeDashboard() {
+  populateEstateOptions();
+  populateSumberOptions();
+  populateLembagaOptions();
+  
+  if (typeof loadTravelAgents === 'function') loadTravelAgents();
+  if (typeof renderCart === 'function') renderCart();
+  
+  // Bind input pembayaran agar otomatis format Rupiah & hitung sisa
+  if (typeof bindPaymentInputs === 'function') bindPaymentInputs();
+  
+  // Terapkan proteksi Role pertama kali
+  applyRoleUiLock_();
+}
+
+/**
+ * MENGATUR AKSES UI (Input vs Edit untuk Manager)
+ * Fungsi ini yang mengatur agar Manager bisa edit tapi tidak bisa input baru.
+ */
+function applyRoleUiLock_() {
+  const S = getState();
+  if (!S.user) return;
+
+  const jab = String(S.user.jabatan || '').toLowerCase().trim();
+  const isInputRole = (jab === 'sales' || jab === 'telemarketing');
+  const isManager   = jab.includes('manager'); 
+
+  const form = document.getElementById('inputForm');
+  const submitBtn = form.querySelector('button[type="submit"]');
+
+  // KONDISI 1: Role Sales / Telemarketing (Akses Penuh)
+  if (isInputRole) {
+    setFormDisabledState_(false);
+    if (submitBtn) {
+      submitBtn.style.display = 'inline-flex';
+      submitBtn.textContent = S.editMode ? 'Update Data' : 'Simpan Data';
+    }
+  } 
+  // KONDISI 2: Role Manager
+  else if (isManager) {
+    if (S.editMode) {
+      // Jika sedang mengedit data lama: BUKA KUNCI
+      setFormDisabledState_(false);
+      if (submitBtn) {
+        submitBtn.style.display = 'inline-flex';
+        submitBtn.textContent = 'Update Data (Manager)';
+      }
+    } else {
+      // Jika form baru (kosong): KUNCI
+      setFormDisabledState_(true);
+      if (submitBtn) submitBtn.style.display = 'none';
+      
+      // Tampilkan pesan bantuan agar manager tidak bingung
+      const existingInfo = document.getElementById('manager-info-msg');
+      if (!existingInfo) {
+        const info = document.createElement('div');
+        info.id = 'manager-info-msg';
+        info.style = 'background:#fff7ed; color:#c2410c; padding:10px; border-radius:8px; font-size:11px; margin-top:10px; border:1px solid #ffedd5; font-weight:600;';
+        info.textContent = '💡 Mode Manager: Anda hanya dapat mengubah data yang sudah ada. Silakan pilih data di menu "Revenue Summary" untuk mengedit.';
+        form.appendChild(info);
+      }
+    }
+  } 
+  // KONDISI 3: Role Lainnya (Read Only)
+  else {
+    setFormDisabledState_(true);
+    if (submitBtn) submitBtn.style.display = 'none';
+  }
+}
+
+/**
+ * Helper untuk mengunci/membuka elemen form
+ */
+function setFormDisabledState_(isDisabled) {
+  const form = document.getElementById('inputForm');
+  if (!form) return;
+  
+  // Daftar elemen yang dikunci
+  const elements = form.querySelectorAll('input, select, textarea, .tab-btn');
+  elements.forEach(el => {
+    el.disabled = isDisabled;
+    el.style.opacity = isDisabled ? '0.6' : '1';
+    el.style.cursor = isDisabled ? 'not-allowed' : 'auto';
+  });
+
+  // Tombol Tambah ke Keranjang
+  const addCartBtn = form.querySelector('button[onclick="addItemToCart()"]');
+  if (addCartBtn) {
+    addCartBtn.disabled = isDisabled;
+    addCartBtn.style.visibility = isDisabled ? 'hidden' : 'visible';
+  }
+}
+
+/**
+ * Mengisi pilihan Estate
+ */
+function populateEstateOptions() {
+  const sel = document.getElementById('estate');
+  if (!sel) return;
+
+  const u = getState().user;
+  const all = ['CES 1','CES 2','CES 3','CES 4','CES 5','CES 6','CES 7','CES 8','CES 9','CES 10'];
+  
+  let list = all;
+  // Jika Sales/Tele/Manager, batasi berdasarkan regional
+  if (u && typeof getEstateAllowedByRegional_ === 'function') {
+    list = getEstateAllowedByRegional_(u.regional);
+  }
+
+  sel.innerHTML = '<option value="">Pilih Estate</option>' + 
+    list.map(e => `<option value="${e}">${e}</option>`).join('');
+}
+
+/**
+ * Mengisi pilihan Sumber
+ */
+function populateSumberOptions() {
+  const sel = document.getElementById('sumber');
+  if (!sel) return;
+
+  const jab = String(getState()?.user?.jabatan || '').toLowerCase();
+  let list = [];
+
+  if (jab === 'sales') {
+    list = ['Canvassing', 'Canvassing CMD', 'Follow Up (Estate)'];
+  } else if (jab === 'telemarketing') {
+    list = ['Instagram', 'Instagram Ads', 'Facebook Ads', 'Qontak', 'Outbound'];
+  } else {
+    list = ['Canvassing', 'Instagram', 'Outbound', 'Walk-in', 'Lainnya'];
+  }
+
+  sel.innerHTML = '<option value="">Pilih Sumber</option>' + 
+    list.map(s => `<option value="${s}">${s}</option>`).join('');
+}
+
+/**
+ * Mengisi pilihan Lembaga
+ */
+function populateLembagaOptions() {
+  const sel = document.getElementById('lembaga');
+  if (!sel) return;
+
+  const jab = String(getState()?.user?.jabatan || '').toLowerCase();
+  let list = [];
+
+  if (jab === 'sales') {
+    list = ['Sekolah', 'Komunitas', 'Perusahaan', 'Pemerintahan'];
+  } else if (jab === 'telemarketing') {
+    list = ['Sekolah', 'Komunitas (Leader Edu)', 'Komunitas (Leader Corpo)', 'Perusahaan', 'Pemerintahan'];
+  } else {
+    list = ['Sekolah', 'Perusahaan', 'Komunitas', 'Pemerintahan', 'Lainnya'];
+  }
+
+  sel.innerHTML = '<option value="">Pilih Lembaga</option>' + 
+    list.map(l => `<option value="${l}">${l}</option>`).join('');
+}
+
+/**
+ * HANDLE SUBMIT - SIMPAN / UPDATE
+ */
+document.getElementById('inputForm').onsubmit = (e) => {
+  e.preventDefault();
+  const S = getState();
+
+  if (!S.cart || S.cart.length === 0) {
+    showToast('Keranjang belanja masih kosong!', 'err');
+    return;
+  }
+
+  const isEdit = S.editMode;
+  const msgLoading = isEdit ? 'Memperbarui Data...' : 'Menyimpan Data...';
+  
+  toggleLoading(true, msgLoading);
+
+  const formData = collectFormData();
+
+  const run = runServer().withSuccessHandler(res => {
+    toggleLoading(false);
+    if (res.success) {
+      showToast(res.message, 'ok');
+      resetForm();
+      if (typeof loadRevenueSummary === 'function') loadRevenueSummary(1);
+    } else {
+      showToast(res.message, 'err');
+    }
+  }).withFailureHandler(err => {
+    toggleLoading(false);
+    showToast('Error Server: ' + err, 'err');
+  });
+
+  if (isEdit) {
+    run.updateOrderWithItems(S.editOrderId, formData, S.cart, S.user.email);
+  } else {
+    run.saveOrderWithItems(formData, S.cart, S.user);
+  }
+};
+
+/**
+ * Mengambil data dari elemen-elemen form
+ */
+function collectFormData() {
+  const S = getState();
+  const paxEl = document.getElementById('jumlahPax');
+  
+  return {
+    estate: document.getElementById('estate').value,
+    status: document.getElementById('status').value,
+    eventDate: document.getElementById('eventDate').value,
+    jamKedatangan: document.getElementById('jamKedatangan').value,
+    namaPIC: document.getElementById('namaPIC').value,
+    noTelp: document.getElementById('noTelp').value,
+    namaGrup: document.getElementById('namaGrup').value,
+    jumlahPax: paxEl ? (parseInt(paxEl.value, 10) || 0) : 0,
+    lembaga: document.getElementById('lembaga').value,
+    sumber: document.getElementById('sumber').value,
+    isTravelAgent: document.getElementById('isTravelAgent').checked,
+    travelAgentKode: S.selectedTravelAgent?.kode || '',
+    travelAgentNama: S.selectedTravelAgent?.nama || '',
+    dp1: parseRupiahToNumber(document.getElementById('dp1').value),
+    tanggalDP: document.getElementById('dp1Date').value,
+    pelunasan: parseRupiahToNumber(document.getElementById('pelunasan').value),
+    tanggalPelunasan: document.getElementById('pelunasanDate').value
+  };
+}
+
+/**
+ * Meriset isi Form ke semula
+ */
+function resetForm() {
+  document.getElementById('inputForm').reset();
+  const S = getState();
+  S.cart = [];
+  S.selectedTravelAgent = null;
+  S.editMode = false;
+  S.editOrderId = null;
+
+  if (typeof renderCart === 'function') renderCart();
+  if (typeof updatePaymentSummaryUI === 'function') updatePaymentSummaryUI();
+  if (typeof toggleTravelAgentSection === 'function') toggleTravelAgentSection();
+  
+  // Kembalikan status kunci (Manager akan terkunci lagi setelah reset)
+  applyRoleUiLock_();
+  
+  // Hapus info message manager jika ada
+  const info = document.getElementById('manager-info-msg');
+  if (info) info.remove();
+}
+</script>

@@ -1,0 +1,265 @@
+<script>
+  /************************************************************
+ *  SUMMARY.JS - Manajemen Riwayat Transaksi & Edit Data
+ *  (Full Version - Support Manager Unlock on Edit)
+ ************************************************************/
+
+let currentRevPage = 1;
+
+/**
+ * Inisialisasi tanggal default (14 hari terakhir)
+ */
+function initRevenueDates() {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - 14); 
+
+  const formatDate = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const startInput = document.getElementById('revStartDate');
+  const endInput = document.getElementById('revEndDate');
+  
+  if (startInput && !startInput.value) startInput.value = formatDate(start);
+  if (endInput && !endInput.value) endInput.value = formatDate(end);
+}
+
+/**
+ * Berpindah ke halaman Revenue Summary
+ */
+function openRevenuePage() {
+  switchPage('revenuePage');
+  initRevenueDates(); 
+  loadRevenueSummary(1);
+}
+
+/**
+ * Kembali ke halaman Input
+ */
+function backToInputPage() {
+  switchPage('inputCard');
+}
+
+/**
+ * Memuat data dari server dengan filter & pagination
+ */
+function loadRevenueSummary(page = 1) {
+  const user = getState().user;
+  if (!user?.email) return;
+
+  currentRevPage = page;
+  const startDate = document.getElementById('revStartDate').value;
+  const endDate = document.getElementById('revEndDate').value;
+  const searchQuery = document.getElementById('summarySearch').value;
+
+  toggleLoading(true, 'Mengambil data transaksi...');
+
+  runServer()
+    .withSuccessHandler(function(res) {
+      toggleLoading(false);
+      getState().summaryData = res.data || [];
+      renderSummaryTable(res.data);
+      updatePaginationUI(res.totalRows, res.page, res.pageSize);
+    })
+    .withFailureHandler(err => {
+      toggleLoading(false);
+      showToast('Gagal memuat data: ' + err, 'err');
+    })
+    .getRevenueSummaryForUser(user.email, {
+      startDate: startDate, 
+      endDate: endDate, 
+      page: page, 
+      pageSize: 50,
+      search: searchQuery
+    });
+}
+
+/**
+ * Render tabel data transaksi
+ */
+function renderSummaryTable(data) {
+  const tbody = document.querySelector('#revenueTable tbody');
+  if (!tbody) return;
+
+  if (!data || data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#94a3b8;">Data tidak ditemukan</td></tr>';
+    return;
+  }
+
+  const statusColors = { 'On Nego': '#D97706', 'Booked': '#2563A6', 'Reservasi': '#1F5D4E', 'Lost': '#C0392B' };
+
+  tbody.innerHTML = data.map(r => `
+    <tr>
+      <td style="font-weight:600;">${r.estate}</td>
+      <td>${r.namaGrup}</td>
+      <td><span style="font-weight:700; color:${statusColors[r.status] || '#64726B'}">${r.status}</span></td>
+      <td style="text-align:right; font-weight:700;">${formatRupiah(r.totalRevenue)}</td>
+      <td style="text-align:center;">
+        <div style="display:flex; gap:6px; justify-content:center;">
+          <button type="button" onclick="editSummaryById('${r.orderId}')" class="btn-primary" style="width:auto; padding:6px 12px; font-size:11px; margin:0; background:#2563eb;">Edit</button>
+          <button type="button" onclick="deleteSummaryById('${r.orderId}')" class="btn-primary" style="width:auto; padding:6px 12px; font-size:11px; background:#ef4444; margin:0;">Hapus</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+/**
+ * Update info halaman & tombol prev/next
+ */
+function updatePaginationUI(totalRows, currentPage, pageSize) {
+  const totalPages = Math.ceil(totalRows / pageSize) || 1;
+  const info = document.getElementById('pageInfo');
+  if (info) info.textContent = `Halaman ${currentPage} / ${totalPages}`;
+  
+  const prevBtn = document.getElementById('prevPage');
+  const nextBtn = document.getElementById('nextPage');
+  
+  if (prevBtn) prevBtn.disabled = (currentPage <= 1);
+  if (nextBtn) nextBtn.disabled = (currentPage >= totalPages);
+}
+
+// Event Listener tombol pagination
+document.addEventListener('DOMContentLoaded', function() {
+  const prevBtn = document.getElementById('prevPage');
+  const nextBtn = document.getElementById('nextPage');
+  if (prevBtn) prevBtn.onclick = () => { if (currentRevPage > 1) loadRevenueSummary(currentRevPage - 1); };
+  if (nextBtn) nextBtn.onclick = () => loadRevenueSummary(currentRevPage + 1);
+});
+
+/**
+ * Ambil detail order untuk diedit
+ */
+window.editSummaryById = function(orderId) {
+  toggleLoading(true, 'Mengambil detail order...');
+  runServer()
+    .withSuccessHandler(res => {
+      if (res.success) {
+        applyOrderDetailToForm(res.header, res.items);
+      } else {
+        toggleLoading(false);
+        showToast('Gagal: ' + res.message, 'err');
+      }
+    })
+    .withFailureHandler(err => {
+      toggleLoading(false);
+      showToast('Error Server: ' + err, 'err');
+    })
+    .fetchOrderDetailForEdit(orderId, getState().user.email);
+}
+
+/**
+ * Masukkan data detail ke dalam form input
+ */
+function applyOrderDetailToForm(header, items) {
+  try {
+    backToInputPage();
+
+    const S = getState();
+    S.editMode = true; // AKTIFKAN MODE EDIT
+    S.editOrderId = header.orderId;
+    S.cart = Array.isArray(items) ? items : [];
+
+    // Helper isi field
+    const fill = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val || '';
+    };
+
+    // 1. Isi Field Dasar
+    fill('namaPIC', header.namaPIC);
+    fill('noTelp', header.noTelp);
+    fill('namaGrup', header.namaGrup);
+    fill('jumlahPax', header.jumlahPax || '');
+    fill('eventDate', normalizeDate(header.eventDate));
+    fill('jamKedatangan', normalizeTime(header.jamKedatangan));
+    
+    fill('dp1', formatRupiah(header.dp1 || 0));
+    fill('dp1Date', normalizeDate(header.tanggalDP));
+    fill('pelunasan', formatRupiah(header.pelunasan || 0));
+    fill('pelunasanDate', normalizeDate(header.tanggalPelunasan));
+
+    // 2. Refresh & Isi Dropdown
+    populateEstateOptions();
+    populateSumberOptions();
+    populateLembagaOptions();
+
+    fill('estate', header.estate);
+    fill('sumber', header.sumber);
+    fill('lembaga', header.lembaga);
+
+    // 3. Status Khusus (Reservasi)
+    const statusEl = document.getElementById('status');
+    if (statusEl) {
+      const isRes = String(header.status).toLowerCase() === 'reservasi';
+      if (isRes) {
+        statusEl.innerHTML = '<option value="Reservasi">Reservasi</option><option value="Lost">Lost</option>';
+      } else {
+        statusEl.innerHTML = '<option value="On Nego">On Nego</option><option value="Booked">Booked</option><option value="Lost">Lost</option>';
+      }
+      statusEl.value = header.status;
+    }
+
+    // 4. Travel Agent
+    const taCheck = document.getElementById('isTravelAgent');
+    if (taCheck) {
+      taCheck.checked = header.isTravelAgent;
+      if (header.isTravelAgent) {
+        S.selectedTravelAgent = { kode: header.travelAgentKode, nama: header.travelAgentNama };
+      }
+      toggleTravelAgentSection();
+    }
+
+    // 5. Render Keranjang & Hitung Ulang
+    renderCart();
+    updatePaymentSummaryUI();
+
+    // !!! PENTING: Buka kunci Form (Manager Regional sekarang bisa akses karena editMode=true)
+    applyRoleUiLock_();
+
+    toggleLoading(false);
+    showToast("Data #" + header.orderId + " dimuat ke form.", "ok");
+
+  } catch (err) {
+    console.error(err);
+    toggleLoading(false);
+    alert("Gagal memuat data ke form: " + err.message);
+  }
+}
+
+/**
+ * Hapus order
+ */
+window.deleteSummaryById = function(orderId) {
+  if (!confirm('Hapus order #' + orderId + '? Data yang dihapus tidak bisa dikembalikan.')) return;
+  
+  toggleLoading(true, 'Menghapus data...');
+  runServer().withSuccessHandler(res => {
+    toggleLoading(false);
+    if (res.success) {
+      showToast(res.message, 'ok');
+      loadRevenueSummary(currentRevPage);
+    } else {
+      showToast(res.message, 'err');
+    }
+  }).deleteOrderById(orderId, getState().user.email);
+}
+
+/**
+ * Pencarian global (Debounce)
+ */
+function handleLocalSearch(event) {
+  if (event && event.key === "Enter") {
+    loadRevenueSummary(1);
+    return;
+  }
+  clearTimeout(window.searchTimeout);
+  window.searchTimeout = setTimeout(() => {
+    loadRevenueSummary(1);
+  }, 700);
+}
+</script>

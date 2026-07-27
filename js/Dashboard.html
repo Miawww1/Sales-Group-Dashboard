@@ -1,0 +1,400 @@
+<script>
+  /************************************************************
+   *  DASHBOARD.JS - Analitik: Revenue, Tren, Estate, Kalender
+   *  (Palet warna & tipografi mengikuti token CSS di Index.html)
+   ************************************************************/
+
+  let trendChartInstance = null;
+  let statusChartInstance = null;
+  let estateChartInstance = null;
+  let calendarViewDate = new Date();
+
+  const ESTATE_LIST_ALL = ['CES 1','CES 2','CES 3','CES 4','CES 5','CES 6','CES 7','CES 8','CES 9','CES 10'];
+  const STATUS_COLORS = { 'On Nego': '#D97706', 'Booked': '#2563A6', 'Reservasi': '#1F5D4E', 'Lost': '#C0392B' };
+  const CHART_PALETTE = ['#1F5D4E','#E0A032','#2563A6','#8B5E3C','#C0392B','#6B8F71','#4A7C74','#D9A441','#3D5A50','#A6673B'];
+
+  // Registrasi plugin kecil: tampilkan total di tengah doughnut chart (status order)
+  if (typeof Chart !== 'undefined') {
+    Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+    Chart.defaults.color = '#64726B';
+    Chart.defaults.plugins.legend.labels.usePointStyle = true;
+    Chart.defaults.plugins.legend.labels.boxWidth = 8;
+    Chart.defaults.plugins.legend.labels.boxHeight = 8;
+    Chart.defaults.plugins.legend.labels.font = { family: "'Inter', system-ui, sans-serif", size: 11, weight: '600' };
+
+    Chart.register({
+      id: 'centerTotalText',
+      afterDraw: function(chart) {
+        if (chart.config.type !== 'doughnut') return;
+        const total = (chart.data.datasets[0].data || []).reduce((a, b) => a + b, 0);
+        const ctx = chart.ctx;
+        const area = chart.chartArea;
+        if (!area) return;
+        const cx = (area.left + area.right) / 2;
+        const cy = (area.top + area.bottom) / 2;
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = "800 22px 'Plus Jakarta Sans', sans-serif";
+        ctx.fillStyle = '#16221D';
+        ctx.fillText(String(total), cx, cy - 8);
+        ctx.font = "700 10px 'Inter', sans-serif";
+        ctx.fillStyle = '#8B978F';
+        ctx.fillText('ORDER', cx, cy + 12);
+        ctx.restore();
+      }
+    });
+  }
+
+  function openAnalyticsPage() {
+    switchPage('analyticsPage');
+    initDashboardFilters();
+    calendarViewDate = new Date();
+    loadDashboardData();
+    loadCalendarMonth();
+  }
+
+  function backToInputFromAnalytics() {
+    switchPage('inputCard');
+  }
+
+  function initDashboardFilters() {
+    const estSel = document.getElementById('dashEstateFilter');
+    if (estSel && estSel.options.length <= 1) {
+      ESTATE_LIST_ALL.forEach(e => {
+        const opt = document.createElement('option');
+        opt.value = e;
+        opt.textContent = e;
+        estSel.appendChild(opt);
+      });
+    }
+    const startInput = document.getElementById('dashStartDate');
+    const endInput = document.getElementById('dashEndDate');
+    if (startInput && !startInput.value) {
+      const d = new Date();
+      d.setDate(d.getDate() - 30);
+      startInput.value = toYmd_(d);
+    }
+    if (endInput && !endInput.value) {
+      const d = new Date();
+      d.setDate(d.getDate() + 30);
+      endInput.value = toYmd_(d);
+    }
+  }
+
+  function toYmd_(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function getDashboardFilterValues_() {
+    return {
+      estate: document.getElementById('dashEstateFilter') ? document.getElementById('dashEstateFilter').value : '',
+      status: document.getElementById('dashStatusFilter') ? document.getElementById('dashStatusFilter').value : ''
+    };
+  }
+
+  /**
+   * Dipanggil oleh tombol "Terapkan" pada filter bar.
+   * Me-refresh KPI/chart DAN kalender bulan berjalan, supaya filter Estate & Status konsisten di semua bagian.
+   */
+  function applyDashboardFilters() {
+    loadDashboardData();
+    loadCalendarMonth();
+  }
+
+  /* ---------------- KPI, TREN, STATUS, ESTATE ---------------- */
+
+  function loadDashboardData() {
+    const user = getState().user;
+    if (!user || !user.email) return;
+
+    const base = getDashboardFilterValues_();
+    const filters = {
+      startDate: document.getElementById('dashStartDate').value,
+      endDate: document.getElementById('dashEndDate').value,
+      estate: base.estate,
+      status: base.status
+    };
+
+    toggleLoading(true, 'Memuat dashboard...');
+    runServer()
+      .withSuccessHandler(function(res) {
+        toggleLoading(false);
+        if (!res || !res.success) {
+          showToast((res && res.message) || 'Gagal memuat dashboard', 'err');
+          return;
+        }
+        renderKpiCards(res.summary);
+        renderTrendChart(res.trend);
+        renderStatusChart(res.statusBreakdown);
+        renderEstateChart(res.estateBreakdown);
+        renderEstateTable(res.estateBreakdown);
+      })
+      .withFailureHandler(function(err) {
+        toggleLoading(false);
+        showToast('Error Server: ' + err, 'err');
+      })
+      .getDashboardData(user.email, filters);
+  }
+
+  function renderKpiCards(summary) {
+    const grid = document.getElementById('dashKpiGrid');
+    if (!grid || !summary) return;
+    const cards = [
+      { cls: 'c-revenue', icon: '💰', label: 'Total Revenue', value: formatRupiah(summary.totalRevenue), sub: 'Periode terpilih' },
+      { cls: 'c-groups', icon: '👥', label: 'Jumlah Grup', value: summary.totalGroups, sub: 'Order tercatat' },
+      { cls: 'c-pax', icon: '🧑\u200d🤝\u200d🧑', label: 'Total Pax', value: Number(summary.totalPax || 0).toLocaleString('id-ID'), sub: 'Estimasi pengunjung' },
+      { cls: 'c-avg', icon: '📈', label: 'Rata-rata / Grup', value: formatRupiah(summary.avgRevenuePerGroup), sub: 'Revenue per grup' }
+    ];
+    grid.innerHTML = cards.map(c => `
+      <div class="dash-kpi-card ${c.cls}">
+        <div class="dash-kpi-icon">${c.icon}</div>
+        <div class="dash-kpi-label">${c.label}</div>
+        <div class="dash-kpi-value">${c.value}</div>
+        <div class="dash-kpi-sub">${c.sub}</div>
+      </div>
+    `).join('');
+  }
+
+  function makeVerticalGradient_(ctx, colorStart, colorEnd) {
+    const h = ctx.canvas.clientHeight || 220;
+    const g = ctx.getContext('2d').createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, colorStart);
+    g.addColorStop(1, colorEnd);
+    return g;
+  }
+
+  function renderTrendChart(trend) {
+    const ctx = document.getElementById('trendChart');
+    if (!ctx || typeof Chart === 'undefined') return;
+    const list = trend || [];
+    const labels = list.map(t => t.date.slice(5));
+    const revenueData = list.map(t => t.revenue);
+    const groupData = list.map(t => t.groups);
+
+    if (trendChartInstance) trendChartInstance.destroy();
+    const barGradient = makeVerticalGradient_(ctx, 'rgba(31,93,78,0.95)', 'rgba(31,93,78,0.45)');
+
+    trendChartInstance = new Chart(ctx, {
+      data: {
+        labels: labels,
+        datasets: [
+          { type: 'bar', label: 'Revenue', data: revenueData, backgroundColor: barGradient, borderRadius: 8, maxBarThickness: 34, yAxisID: 'y' },
+          { type: 'line', label: 'Jumlah Grup', data: groupData, borderColor: '#E0A032', backgroundColor: '#E0A032', tension: 0.4, borderWidth: 2.5, pointRadius: 3, pointBackgroundColor: '#E0A032', pointBorderColor: '#fff', pointBorderWidth: 1.5, yAxisID: 'y1' }
+        ]
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: { grid: { display: false } },
+          y: { beginAtZero: true, position: 'left', grid: { color: '#EFF2E9' }, ticks: { callback: v => formatRupiah(v) } },
+          y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { precision: 0 } }
+        },
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: {
+            backgroundColor: '#123B31', padding: 10, cornerRadius: 8, titleFont: { weight: '700' },
+            callbacks: {
+              label: function(item) {
+                if (item.dataset.label === 'Revenue') return 'Revenue: ' + formatRupiah(item.raw);
+                return 'Grup: ' + item.raw;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function renderStatusChart(statusBreakdown) {
+    const ctx = document.getElementById('statusChart');
+    if (!ctx || typeof Chart === 'undefined') return;
+    const list = statusBreakdown || [];
+    const labels = list.map(s => s.status);
+    const data = list.map(s => s.count);
+    const colors = labels.map(l => STATUS_COLORS[l] || '#8B978F');
+
+    if (statusChartInstance) statusChartInstance.destroy();
+    if (list.length === 0) return;
+    statusChartInstance = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 3, borderColor: '#fff', hoverOffset: 6 }] },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: { backgroundColor: '#123B31', padding: 10, cornerRadius: 8 }
+        },
+        cutout: '68%'
+      }
+    });
+  }
+
+  function renderEstateChart(estateBreakdown) {
+    const ctx = document.getElementById('estateChart');
+    if (!ctx || typeof Chart === 'undefined') return;
+    const list = (estateBreakdown || []).slice(0, 10);
+    const labels = list.map(e => e.estate);
+    const data = list.map(e => e.revenue);
+
+    if (estateChartInstance) estateChartInstance.destroy();
+    if (list.length === 0) return;
+    estateChartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: labels, datasets: [{ label: 'Revenue', data: data, backgroundColor: CHART_PALETTE, borderRadius: 8, maxBarThickness: 26 }] },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: { backgroundColor: '#123B31', padding: 10, cornerRadius: 8, callbacks: { label: item => formatRupiah(item.raw) } }
+        },
+        scales: {
+          x: { grid: { color: '#EFF2E9' }, ticks: { callback: v => formatRupiah(v) } },
+          y: { grid: { display: false } }
+        }
+      }
+    });
+  }
+
+  function renderEstateTable(estateBreakdown) {
+    const container = document.getElementById('estateTableContainer');
+    if (!container) return;
+    const list = estateBreakdown || [];
+    if (list.length === 0) {
+      container.innerHTML = '<p style="padding:20px;color:var(--color-text-soft);text-align:center;">Belum ada data</p>';
+      return;
+    }
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr><th>Estate</th><th style="text-align:center;">Grup</th><th style="text-align:center;">Pax</th><th style="text-align:right;">Revenue</th></tr></thead><tbody>';
+    list.forEach(e => {
+      html += `<tr>
+        <td style="font-weight:700;">${e.estate}</td>
+        <td style="text-align:center;">${e.groups}</td>
+        <td style="text-align:center;">${e.pax}</td>
+        <td style="text-align:right;font-weight:700; color:var(--color-primary);">${formatRupiah(e.revenue)}</td>
+      </tr>`;
+    });
+    container.innerHTML = html + '</tbody></table>';
+  }
+
+  /* ---------------- KALENDER KEDATANGAN GRUP ---------------- */
+
+  const WEEKDAY_LABELS = ['Min','Sen','Sel','Rab','Kam','Jum','Sab'];
+  const MONTH_LABELS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+
+  function calendarPrevMonth() {
+    calendarViewDate.setMonth(calendarViewDate.getMonth() - 1);
+    loadCalendarMonth();
+  }
+
+  function calendarNextMonth() {
+    calendarViewDate.setMonth(calendarViewDate.getMonth() + 1);
+    loadCalendarMonth();
+  }
+
+  function loadCalendarMonth() {
+    const user = getState().user;
+    if (!user || !user.email) return;
+
+    const year = calendarViewDate.getFullYear();
+    const month = calendarViewDate.getMonth() + 1;
+    const label = document.getElementById('calendarMonthLabel');
+    if (label) label.textContent = MONTH_LABELS[month - 1] + ' ' + year;
+
+    const weekdayEl = document.getElementById('calendarWeekdays');
+    if (weekdayEl && !weekdayEl.dataset.rendered) {
+      weekdayEl.innerHTML = WEEKDAY_LABELS.map(w => `<div class="dash-calendar-weekday">${w}</div>`).join('');
+      weekdayEl.dataset.rendered = '1';
+    }
+
+    const filters = getDashboardFilterValues_();
+
+    toggleLoading(true, 'Memuat kalender...');
+    runServer()
+      .withSuccessHandler(function(res) {
+        toggleLoading(false);
+        if (!res || !res.success) {
+          showToast((res && res.message) || 'Gagal memuat kalender', 'err');
+          return;
+        }
+        renderCalendarGrid(year, month, res.days || {});
+      })
+      .withFailureHandler(function(err) {
+        toggleLoading(false);
+        showToast('Error Server: ' + err, 'err');
+      })
+      .getCalendarData(user.email, year, month, filters);
+  }
+
+  function renderCalendarGrid(year, month, daysData) {
+    const grid = document.getElementById('calendarGrid');
+    if (!grid) return;
+
+    const firstDay = new Date(year, month - 1, 1);
+    const startOffset = firstDay.getDay(); // 0 = Minggu
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const todayYmd = toYmd_(new Date());
+
+    // Cari nilai revenue tertinggi dalam bulan ini untuk skala warna heatmap
+    let maxRevenue = 0;
+    Object.keys(daysData).forEach(k => { if (daysData[k].revenue > maxRevenue) maxRevenue = daysData[k].revenue; });
+
+    let html = '';
+    for (let i = 0; i < startOffset; i++) html += '<div class="dash-calendar-day empty"></div>';
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ymd = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      const info = daysData[ymd];
+      const hasData = !!info;
+      const isToday = ymd === todayYmd;
+
+      let bgStyle = '';
+      if (hasData && maxRevenue > 0) {
+        const ratio = Math.min(info.revenue / maxRevenue, 1);
+        const alpha = 0.14 + ratio * 0.5; // 0.14 - 0.64, agar teks tetap terbaca
+        bgStyle = ` style="background: rgba(31,93,78,${alpha.toFixed(2)});"`;
+      }
+
+      html += `<div class="dash-calendar-day ${hasData ? 'has-data' : ''} ${isToday ? 'today' : ''}"${bgStyle} ${hasData ? `onclick="showCalendarDayDetail('${ymd}')"` : ''}>
+        <span class="day-num">${d}</span>
+        ${hasData ? `<span class="day-badge">${info.groups} grup</span>` : ''}
+      </div>`;
+    }
+
+    grid.innerHTML = html;
+    window._calendarDaysData = daysData;
+  }
+
+  function showCalendarDayDetail(ymd) {
+    const info = (window._calendarDaysData || {})[ymd];
+    if (!info) return;
+    const titleEl = document.getElementById('calendarModalTitle');
+    if (titleEl) titleEl.textContent = 'Kedatangan ' + ymd;
+
+    let body = `<div style="display:flex; gap:16px; margin-bottom:16px; font-size:13px;">
+      <div><strong>${info.groups}</strong> grup</div>
+      <div><strong>${info.pax}</strong> pax</div>
+      <div><strong>${formatRupiah(info.revenue)}</strong></div>
+    </div>`;
+    body += '<div style="display:flex; flex-direction:column; gap:8px;">';
+    (info.items || []).forEach(it => {
+      const color = STATUS_COLORS[it.status] || '#8B978F';
+      body += `<div style="border:1px solid var(--color-border); border-radius:8px; padding:10px;">
+        <div style="font-weight:700; font-size:13px;">${it.namaGrup}</div>
+        <div style="font-size:11px; color:var(--color-text-muted); margin-top:2px;">${it.estate} &middot; <span style="color:${color}; font-weight:700;">${it.status}</span></div>
+      </div>`;
+    });
+    body += '</div>';
+    const bodyEl = document.getElementById('calendarModalBody');
+    if (bodyEl) bodyEl.innerHTML = body;
+
+    const modal = document.getElementById('calendarDayModal');
+    if (modal) modal.classList.remove('hidden');
+  }
+
+  function closeCalendarDayModal() {
+    const modal = document.getElementById('calendarDayModal');
+    if (modal) modal.classList.add('hidden');
+  }
+</script>

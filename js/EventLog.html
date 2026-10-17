@@ -1,0 +1,127 @@
+<script>
+  /************************************************************
+   *  EVENTLOG.JS - Log Aktivitas (Audit Trail), khusus Admin
+   *  Nampilin semua "Tambah Order", "Update Order", "Hapus Order"
+   *  yang tercatat di sheet EventLog. Backend (getEventLog) sudah
+   *  nge-block role selain Admin, ini cuma lapisan UI-nya.
+   ************************************************************/
+
+  let currentLogPage = 1;
+
+  function initLogDates() {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 14);
+
+    const formatDate = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const startInput = document.getElementById('logStartDate');
+    const endInput = document.getElementById('logEndDate');
+
+    if (startInput && !startInput.value) startInput.value = formatDate(start);
+    if (endInput && !endInput.value) endInput.value = formatDate(end);
+  }
+
+  function openEventLogPage() {
+    const S = getState();
+    const jab = String(S.user?.jabatan || '').toLowerCase().trim();
+    if (jab !== 'admin') {
+      showToast('Halaman ini hanya bisa diakses oleh Admin', 'err');
+      return;
+    }
+    switchPage('eventLogPage');
+    initLogDates();
+    loadEventLog(1);
+  }
+
+  function loadEventLog(page = 1) {
+    const user = getState().user;
+    if (!user?.email) return;
+
+    currentLogPage = page;
+    const startDate = document.getElementById('logStartDate').value;
+    const endDate = document.getElementById('logEndDate').value;
+    const searchQuery = document.getElementById('logSearch').value;
+
+    toggleLoading(true, 'Mengambil log aktivitas...');
+
+    runServer()
+      .withSuccessHandler(function(res) {
+        toggleLoading(false);
+        if (res.message && (!res.data || res.data.length === 0) && res.totalRows === 0 && res.message.indexOf('ditolak') !== -1) {
+          showToast(res.message, 'err');
+        }
+        renderEventLogTable(res.data);
+        updateLogPaginationUI(res.totalRows, res.page || page, res.pageSize || 50);
+      })
+      .withFailureHandler(err => {
+        toggleLoading(false);
+        showToast('Gagal memuat log: ' + err, 'err');
+      })
+      .getEventLog(user.email, {
+        startDate: startDate,
+        endDate: endDate,
+        page: page,
+        pageSize: 50,
+        search: searchQuery
+      });
+  }
+
+  const LOG_ACTION_COLORS_ = { 'Tambah Order': '#7F5836', 'Update Order': '#593E26', 'Hapus Order': '#C0392B' };
+
+  function renderEventLogTable(data) {
+    const tbody = document.querySelector('#eventLogTable tbody');
+    if (!tbody) return;
+
+    if (!data || data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:#82746D;">Belum ada aktivitas yang tercatat</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.map(r => `
+      <tr>
+        <td style="white-space:nowrap; font-size:12px; color:#73645C;">${r.timestamp}</td>
+        <td><span style="font-weight:700; font-size:12px; color:${LOG_ACTION_COLORS_[r.aksi] || '#443025'};">${r.aksi}</span></td>
+        <td style="font-weight:600;">${r.estate || '-'}</td>
+        <td>${r.grup || '-'}</td>
+        <td style="font-size:12.5px; max-width:420px;">${r.detail || '-'}</td>
+        <td style="font-size:12px; color:#73645C;">${r.oleh || '-'}</td>
+      </tr>
+    `).join('');
+  }
+
+  function updateLogPaginationUI(totalRows, currentPage, pageSize) {
+    const totalPages = Math.ceil(totalRows / pageSize) || 1;
+    const info = document.getElementById('logPageInfo');
+    if (info) info.textContent = `Halaman ${currentPage} / ${totalPages}`;
+
+    const prevBtn = document.getElementById('logPrevPage');
+    const nextBtn = document.getElementById('logNextPage');
+
+    if (prevBtn) prevBtn.disabled = (currentPage <= 1);
+    if (nextBtn) nextBtn.disabled = (currentPage >= totalPages);
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    const prevBtn = document.getElementById('logPrevPage');
+    const nextBtn = document.getElementById('logNextPage');
+    if (prevBtn) prevBtn.onclick = () => { if (currentLogPage > 1) loadEventLog(currentLogPage - 1); };
+    if (nextBtn) nextBtn.onclick = () => loadEventLog(currentLogPage + 1);
+  });
+
+  function handleLogSearch(event) {
+    if (event && event.key === "Enter") {
+      loadEventLog(1);
+      return;
+    }
+    clearTimeout(window.logSearchTimeout);
+    window.logSearchTimeout = setTimeout(() => {
+      loadEventLog(1);
+    }, 700);
+  }
+</script>

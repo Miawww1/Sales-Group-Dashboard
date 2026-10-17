@@ -7,18 +7,21 @@
  * Inisialisasi awal saat Dashboard terbuka
  */
 function initializeDashboard() {
-  populateEstateOptions();
-  populateSumberOptions();
-  populateLembagaOptions();
-  
-  if (typeof loadTravelAgents === 'function') loadTravelAgents();
-  if (typeof renderCart === 'function') renderCart();
-  
+  // Setiap langkah dibungkus try/catch sendiri-sendiri supaya kalau salah
+  // satu gagal (mis. populateSumberOptions error), langkah setelahnya
+  // (populateLembagaOptions, dst) TETAP jalan dan dropdown tidak kosong.
+  try { populateEstateOptions(); } catch (e) { console.error('populateEstateOptions gagal:', e); }
+  try { populateSumberOptions(); } catch (e) { console.error('populateSumberOptions gagal:', e); }
+  try { populateLembagaOptions(); } catch (e) { console.error('populateLembagaOptions gagal:', e); }
+
+  try { if (typeof loadTravelAgents === 'function') loadTravelAgents(); } catch (e) { console.error('loadTravelAgents gagal:', e); }
+  try { if (typeof renderCart === 'function') renderCart(); } catch (e) { console.error('renderCart gagal:', e); }
+
   // Bind input pembayaran agar otomatis format Rupiah & hitung sisa
-  if (typeof bindPaymentInputs === 'function') bindPaymentInputs();
-  
+  try { if (typeof bindPaymentInputs === 'function') bindPaymentInputs(); } catch (e) { console.error('bindPaymentInputs gagal:', e); }
+
   // Terapkan proteksi Role pertama kali
-  applyRoleUiLock_();
+  try { applyRoleUiLock_(); } catch (e) { console.error('applyRoleUiLock_ gagal:', e); }
 }
 
 /**
@@ -63,7 +66,7 @@ function applyRoleUiLock_() {
       if (!existingInfo) {
         const info = document.createElement('div');
         info.id = 'manager-info-msg';
-        info.style = 'background:#fff7ed; color:#c2410c; padding:10px; border-radius:8px; font-size:11px; margin-top:10px; border:1px solid #ffedd5; font-weight:600;';
+        info.style = 'background:#FCF0F0; color:#B87A7A; padding:10px; border-radius:8px; font-size:11px; margin-top:10px; border:1px solid #F8DCDD; font-weight:600;';
         info.textContent = '💡 Mode Manager: Anda hanya dapat mengubah data yang sudah ada. Silakan pilih data di menu "Revenue Summary" untuk mengedit.';
         form.appendChild(info);
       }
@@ -74,6 +77,12 @@ function applyRoleUiLock_() {
     setFormDisabledState_(true);
     if (submitBtn) submitBtn.style.display = 'none';
   }
+
+  // Tab "Log Aktivitas" cuma buat Admin. Role lain gak usah lihat tabnya
+  // sama sekali (bukan cuma dibatasi datanya, tapi emang gak ditampilkan).
+  const isAdmin = jab === 'admin';
+  const logTab = document.querySelector('.nav-tab[data-target="eventLogPage"]');
+  if (logTab) logTab.style.display = isAdmin ? '' : 'none';
 }
 
 /**
@@ -218,6 +227,7 @@ function collectFormData() {
     namaPIC: document.getElementById('namaPIC').value,
     noTelp: document.getElementById('noTelp').value,
     namaGrup: document.getElementById('namaGrup').value,
+    kotaAsalGrup: document.getElementById('kotaAsalGrup').value,
     jumlahPax: paxEl ? (parseInt(paxEl.value, 10) || 0) : 0,
     lembaga: document.getElementById('lembaga').value,
     sumber: document.getElementById('sumber').value,
@@ -227,7 +237,8 @@ function collectFormData() {
     dp1: parseRupiahToNumber(document.getElementById('dp1').value),
     tanggalDP: document.getElementById('dp1Date').value,
     pelunasan: parseRupiahToNumber(document.getElementById('pelunasan').value),
-    tanggalPelunasan: document.getElementById('pelunasanDate').value
+    tanggalPelunasan: document.getElementById('pelunasanDate').value,
+    perluReschedule: document.getElementById('perluReschedule') ? document.getElementById('perluReschedule').checked : false
   };
 }
 

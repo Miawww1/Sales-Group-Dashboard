@@ -139,7 +139,7 @@ function normalizeTime(v) {
    * (bukan ditumpuk/di-embed satu sama lain) dan status tab aktif di
    * topbar selalu sinkron dengan halaman yang sedang tampil.
    */
-  const APP_PAGES_ = ['inputCard', 'revenuePage', 'analyticsPage'];
+  const APP_PAGES_ = ['inputCard', 'revenuePage', 'analyticsPage', 'eventLogPage'];
   function switchPage(targetId) {
     APP_PAGES_.forEach(id => {
       const el = document.getElementById(id);
@@ -158,17 +158,17 @@ function normalizeTime(v) {
     const agents = S.travelAgents || [];
     const q = document.getElementById('travelAgentSearch').value.toLowerCase().trim();
     const filtered = agents.filter(a => (String(a.kode||'').trim() !== "" && String(a.nama||'').trim() !== "") && (String(a.kode).toLowerCase().includes(q) || String(a.nama).toLowerCase().includes(q)));
-    if (filtered.length === 0) { container.innerHTML = '<p style="font-size:12px;color:#999;padding:15px;text-align:center;">Data tidak ditemukan.</p>'; return; }
+    if (filtered.length === 0) { container.innerHTML = '<p style="font-size:12px;color:#82746D;padding:15px;text-align:center;">Data tidak ditemukan.</p>'; return; }
     let html = '<div class="scrollable-table-container"><table style="width:100%; border-collapse:collapse;"><thead><tr><th style="padding:12px 10px;">KODE</th><th style="padding:12px 10px;">NAMA TRAVEL AGENT</th><th style="padding:12px 10px;">REGIONAL</th><th style="padding:12px 10px; text-align:center;">AKSI</th></tr></thead><tbody>';
     filtered.forEach((a, index) => {
       const isSelected = S.selectedTravelAgent && S.selectedTravelAgent.kode === a.kode;
-      html += `<tr style="background:${isSelected ? '#eff6ff' : (index % 2 === 0 ? 'white' : '#f9fafb')}; border-bottom: 1px solid #e5e7eb;">
+      html += `<tr style="background:${isSelected ? '#E7DBD4' : (index % 2 === 0 ? 'white' : '#FBEBEB')}; border-bottom: 1px solid #D0B9AB;">
         <td style="padding:12px 10px; font-weight:500;">${a.kode}</td>
         <td style="padding:12px 10px; white-space: normal;">${a.nama}</td>
-        <td style="padding:12px 10px; color:#64748b;">${a.regional || '-'}</td>
+        <td style="padding:12px 10px; color:#73645C;">${a.regional || '-'}</td>
         <td style="padding:12px 10px; text-align:center;">
-          ${isSelected ? '<span style="color:#2563eb; font-weight:700; font-size:12px;">✓ Dipilih</span>' : 
-          `<button type="button" onclick="selectTravelAgent('${a.kode.replace(/'/g, "\\'")}', '${a.nama.replace(/'/g, "\\'")}')" style="background:#2563eb; color:white; border:none; padding:6px 15px; border-radius:6px; cursor:pointer; font-weight:600; font-size:12px;">Pilih</button>`}
+          ${isSelected ? '<span style="color:#593E26; font-weight:700; font-size:12px;">✓ Dipilih</span>' : 
+          `<button type="button" onclick="selectTravelAgent('${a.kode.replace(/'/g, "\\'")}', '${a.nama.replace(/'/g, "\\'")}')" style="background:#593E26; color:white; border:none; padding:6px 15px; border-radius:6px; cursor:pointer; font-weight:600; font-size:12px;">Pilih</button>`}
         </td></tr>`;
     });
     container.innerHTML = html + '</tbody></table></div>';

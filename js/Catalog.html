@@ -45,44 +45,31 @@
     const selected = this.options[this.selectedIndex];
     const hargaInput = document.getElementById('prodHarga');
     const kodeInput = document.getElementById('kodeProduk');
-    
-    // Ambil nilai estate yang sedang dipilih
-    const selectedEstate = document.getElementById('estate').value;
 
     if (selected && selected.value) {
       let hargaDb = String(selected.dataset.harga || '').trim();
       kodeInput.value = selected.dataset.kode;
 
-      // ATURAN KHUSUS: 
-      // 1. Jika Estate adalah "CES 4" -> JANGAN LOCK (selalu bisa edit)
-      // 2. Jika harga di DB adalah "-" atau "0" -> JANGAN LOCK
-      if (selectedEstate === "CES 4" || hargaDb === "-" || hargaDb === "0" || hargaDb === "" || hargaDb === "NaN") {
-        
-        hargaInput.readOnly = false; // Buka kunci
-        hargaInput.style.background = "#ffffff"; // Latar putih (menandakan bisa diisi)
-        hargaInput.style.border = "2px solid #2563eb"; // Beri border biru agar mencolok
-        
-        // Jika harganya memang 0 atau strip, set nilai default "0"
-        if (hargaDb === "-" || hargaDb === "0" || hargaDb === "" || hargaDb === "NaN") {
-          hargaInput.value = "0";
-        } else {
-          // Jika ada harganya (khusus CES 4), tampilkan harganya tapi tetap bisa diedit
-          hargaInput.value = formatRupiah(hargaDb);
-        }
-        
+      // Harga produk sekarang SELALU bisa diedit manual di semua Estate
+      // (harga suka berubah-ubah, jadi sales bisa update sendiri kalau
+      // katalog belum sempat di-update).
+      hargaInput.readOnly = false;
+      hargaInput.style.background = "#ffffff"; // Latar putih (menandakan bisa diisi)
+      hargaInput.style.border = "2px solid #593E26"; // Beri border biru agar mencolok
+
+      // Kalau harga di DB kosong/strip/0, mulai dari "0"; kalau ada, tampilkan
+      // harga dari katalog sebagai nilai awal (tetap bisa diedit).
+      if (hargaDb === "-" || hargaDb === "0" || hargaDb === "" || hargaDb === "NaN") {
+        hargaInput.value = "0";
       } else {
-        // Selain kondisi di atas, maka LOCK harga (Read Only)
-        hargaInput.readOnly = true;
         hargaInput.value = formatRupiah(hargaDb);
-        hargaInput.style.background = "#f3f4f6"; // Latar abu-abu (terkunci)
-        hargaInput.style.border = "1px solid #d1d5db";
       }
     } else {
       // Reset jika tidak ada produk yang dipilih
       kodeInput.value = '';
       hargaInput.value = '';
-      hargaInput.readOnly = true;
-      hargaInput.style.background = "#f3f4f6";
+      hargaInput.readOnly = false;
+      hargaInput.style.background = "#ffffff";
     }
   });
 </script>

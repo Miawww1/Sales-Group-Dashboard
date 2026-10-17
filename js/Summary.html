@@ -86,26 +86,54 @@ function renderSummaryTable(data) {
   if (!tbody) return;
 
   if (!data || data.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#94a3b8;">Data tidak ditemukan</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#82746D;">Data tidak ditemukan</td></tr>';
     return;
   }
 
-  const statusColors = { 'On Nego': '#D97706', 'Booked': '#2563A6', 'Reservasi': '#1F5D4E', 'Lost': '#C0392B' };
+  const statusColors = { 'On Nego': '#EC9C9D', 'Booked': '#593E26', 'Reservasi': '#7F5836', 'Lost': '#C0392B' };
 
   tbody.innerHTML = data.map(r => `
-    <tr>
+    <tr style="${r.perluReschedule ? 'background:#FCF0F0;' : ''}">
       <td style="font-weight:600;">${r.estate}</td>
-      <td>${r.namaGrup}</td>
-      <td><span style="font-weight:700; color:${statusColors[r.status] || '#64726B'}">${r.status}</span></td>
+      <td>
+        ${r.namaGrup}
+        ${r.perluReschedule ? '<div style="margin-top:4px;"><span style="display:inline-block; font-size:10px; font-weight:700; color:#B87A7A; background:#FAE6E6; border:1px solid #F8DCDD; padding:2px 8px; border-radius:20px; letter-spacing:.02em;">🔄 PERLU RESCHEDULE</span></div>' : ''}
+      </td>
+      <td><span style="font-weight:700; color:${statusColors[r.status] || '#73645C'}">${r.status}</span></td>
       <td style="text-align:right; font-weight:700;">${formatRupiah(r.totalRevenue)}</td>
       <td style="text-align:center;">
         <div style="display:flex; gap:6px; justify-content:center;">
-          <button type="button" onclick="editSummaryById('${r.orderId}')" class="btn-primary" style="width:auto; padding:6px 12px; font-size:11px; margin:0; background:#2563eb;">Edit</button>
+          <button type="button" onclick="toggleReschedule('${r.orderId}')" title="${r.perluReschedule ? 'Lepas tanda reschedule' : 'Tandai perlu reschedule'}" class="btn-primary" style="width:auto; padding:6px 10px; font-size:12px; margin:0; background:${r.perluReschedule ? '#B87A7A' : '#F2CFCB'}; color:${r.perluReschedule ? '#fff' : '#443025'};">🔄</button>
+          <button type="button" onclick="editSummaryById('${r.orderId}')" class="btn-primary" style="width:auto; padding:6px 12px; font-size:11px; margin:0; background:#593E26;">Edit</button>
           <button type="button" onclick="deleteSummaryById('${r.orderId}')" class="btn-primary" style="width:auto; padding:6px 12px; font-size:11px; background:#ef4444; margin:0;">Hapus</button>
         </div>
       </td>
     </tr>
   `).join('');
+}
+
+/**
+ * Toggle cepat flag "Perlu Reschedule" langsung dari tabel, tanpa buka form
+ * edit. Dipakai waktu sales/manager tahu ada grup minta reschedule tapi
+ * tanggal barunya belum pasti.
+ */
+window.toggleReschedule = function(orderId) {
+  toggleLoading(true, 'Menyimpan...');
+  runServer()
+    .withSuccessHandler(res => {
+      toggleLoading(false);
+      if (res.success) {
+        showToast(res.message, 'ok');
+        loadRevenueSummary(currentRevPage);
+      } else {
+        showToast(res.message, 'err');
+      }
+    })
+    .withFailureHandler(err => {
+      toggleLoading(false);
+      showToast('Error Server: ' + err, 'err');
+    })
+    .toggleRescheduleFlag(orderId, getState().user.email);
 }
 
 /**
@@ -174,6 +202,7 @@ function applyOrderDetailToForm(header, items) {
     fill('namaPIC', header.namaPIC);
     fill('noTelp', header.noTelp);
     fill('namaGrup', header.namaGrup);
+    fill('kotaAsalGrup', header.kotaAsalGrup);
     fill('jumlahPax', header.jumlahPax || '');
     fill('eventDate', normalizeDate(header.eventDate));
     fill('jamKedatangan', normalizeTime(header.jamKedatangan));
@@ -182,6 +211,9 @@ function applyOrderDetailToForm(header, items) {
     fill('dp1Date', normalizeDate(header.tanggalDP));
     fill('pelunasan', formatRupiah(header.pelunasan || 0));
     fill('pelunasanDate', normalizeDate(header.tanggalPelunasan));
+
+    const rescheduleEl = document.getElementById('perluReschedule');
+    if (rescheduleEl) rescheduleEl.checked = !!header.perluReschedule;
 
     // 2. Refresh & Isi Dropdown
     populateEstateOptions();

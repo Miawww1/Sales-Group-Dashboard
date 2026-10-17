@@ -2,6 +2,8 @@
   /************************************************************
    *  DASHBOARD.JS - Analitik: Revenue, Tren, Estate, Kalender
    *  (Palet warna & tipografi mengikuti token CSS di Index.html)
+   *  FIX v2: chart mixed bar+line butuh "type" di root config,
+   *  modal detail kalender sekarang carousel satu-per-satu (bukan gabungan)
    ************************************************************/
 
   let trendChartInstance = null;
@@ -10,13 +12,13 @@
   let calendarViewDate = new Date();
 
   const ESTATE_LIST_ALL = ['CES 1','CES 2','CES 3','CES 4','CES 5','CES 6','CES 7','CES 8','CES 9','CES 10'];
-  const STATUS_COLORS = { 'On Nego': '#D97706', 'Booked': '#2563A6', 'Reservasi': '#1F5D4E', 'Lost': '#C0392B' };
-  const CHART_PALETTE = ['#1F5D4E','#E0A032','#2563A6','#8B5E3C','#C0392B','#6B8F71','#4A7C74','#D9A441','#3D5A50','#A6673B'];
+  const STATUS_COLORS = { 'On Nego': '#EC9C9D', 'Booked': '#593E26', 'Reservasi': '#7F5836', 'Lost': '#C0392B' };
+  const CHART_PALETTE = ['#7F5836','#EC9C9D','#443025','#593E26','#B87A7A','#96765A','#C79A82','#AA7F66','#F2CFCB','#73645C'];
 
   // Registrasi plugin kecil: tampilkan total di tengah doughnut chart (status order)
   if (typeof Chart !== 'undefined') {
     Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
-    Chart.defaults.color = '#64726B';
+    Chart.defaults.color = '#73645C';
     Chart.defaults.plugins.legend.labels.usePointStyle = true;
     Chart.defaults.plugins.legend.labels.boxWidth = 8;
     Chart.defaults.plugins.legend.labels.boxHeight = 8;
@@ -36,10 +38,10 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = "800 22px 'Plus Jakarta Sans', sans-serif";
-        ctx.fillStyle = '#16221D';
+        ctx.fillStyle = '#443025';
         ctx.fillText(String(total), cx, cy - 8);
         ctx.font = "700 10px 'Inter', sans-serif";
-        ctx.fillStyle = '#8B978F';
+        ctx.fillStyle = '#82746D';
         ctx.fillText('ORDER', cx, cy + 12);
         ctx.restore();
       }
@@ -68,17 +70,13 @@
         estSel.appendChild(opt);
       });
     }
-    const startInput = document.getElementById('dashStartDate');
-    const endInput = document.getElementById('dashEndDate');
-    if (startInput && !startInput.value) {
-      const d = new Date();
-      d.setDate(d.getDate() - 30);
-      startInput.value = toYmd_(d);
-    }
-    if (endInput && !endInput.value) {
-      const d = new Date();
-      d.setDate(d.getDate() + 30);
-      endInput.value = toYmd_(d);
+    if (!window._dashDateRange) {
+      const end = new Date();
+      end.setDate(end.getDate() + 30);
+      const start = new Date();
+      start.setDate(start.getDate() - 30);
+      window._dashDateRange = { start: toYmd_(start), end: toYmd_(end) };
+      commitDateRange_(window._dashDateRange.start, window._dashDateRange.end);
     }
   }
 
@@ -89,7 +87,8 @@
   function getDashboardFilterValues_() {
     return {
       estate: document.getElementById('dashEstateFilter') ? document.getElementById('dashEstateFilter').value : '',
-      status: document.getElementById('dashStatusFilter') ? document.getElementById('dashStatusFilter').value : ''
+      status: document.getElementById('dashStatusFilter') ? document.getElementById('dashStatusFilter').value : '',
+      regional: document.getElementById('dashRegionalFilter') ? document.getElementById('dashRegionalFilter').value : ''
     };
   }
 
@@ -100,6 +99,192 @@
   function applyDashboardFilters() {
     loadDashboardData();
     loadCalendarMonth();
+  }
+
+  /* ---------------- DATE RANGE PICKER (Dashboard Analitik) ---------------- */
+
+  const DATE_PICKER_PRESETS_ = ['Hari Ini', 'Kemarin', '7 Hari Terakhir', '30 Hari Terakhir', 'Bulan Ini', 'Bulan Lalu', 'Custom'];
+
+  function fmtIdDate_(ymd) {
+    if (!ymd) return '';
+    const [y, m, d] = ymd.split('-');
+    return `${d}/${m}/${y}`;
+  }
+  function parseYmd_(ymd) {
+    const [y, m, d] = ymd.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  function commitDateRange_(startYmd, endYmd) {
+    window._dashDateRange = { start: startYmd, end: endYmd };
+    document.getElementById('dashStartDate').value = startYmd;
+    document.getElementById('dashEndDate').value = endYmd;
+    const label = document.getElementById('dashDateRangeLabel');
+    if (label) label.textContent = fmtIdDate_(startYmd) + ' - ' + fmtIdDate_(endYmd);
+  }
+
+  function toggleDateRangePicker_() {
+    const panel = document.getElementById('dashDateRangePanel');
+    if (!panel) return;
+    if (!panel.classList.contains('hidden')) {
+      panel.classList.add('hidden');
+      return;
+    }
+    const cur = window._dashDateRange || {};
+    window._dpDraft = { start: cur.start || null, end: cur.end || null, activePreset: 'Custom', selecting: 'start' };
+    const anchor = cur.start ? parseYmd_(cur.start) : new Date();
+    window._dpViewMonth = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+    renderDateRangePickerPanel_();
+    panel.classList.remove('hidden');
+  }
+
+  function closeDateRangePicker_() {
+    const panel = document.getElementById('dashDateRangePanel');
+    if (panel) panel.classList.add('hidden');
+  }
+
+  document.addEventListener('click', function(e) {
+    const panel = document.getElementById('dashDateRangePanel');
+    const trigger = document.getElementById('dashDateRangeTrigger');
+    if (!panel || panel.classList.contains('hidden')) return;
+    // PENTING: pakai composedPath(), bukan panel.contains(e.target).
+    // Klik tanggal/preset/panah bulan bikin panel di-render ulang
+    // (innerHTML diganti), jadi elemen yang diklik udah kehapus dari DOM
+    // pas listener ini jalan — panel.contains(e.target) jadi salah nganggep
+    // itu "klik di luar" dan nutup panel-nya sendiri. composedPath() ngasih
+    // urutan elemen ASLI pas event terjadi, jadi gak kepengaruh render ulang.
+    const path = e.composedPath ? e.composedPath() : [];
+    if (path.includes(panel) || (trigger && path.includes(trigger))) return;
+    closeDateRangePicker_();
+  });
+
+  function renderMiniMonth_(viewDate, draft) {
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const startOffset = firstDay.getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    let cells = '';
+    for (let i = 0; i < startOffset; i++) cells += '<span class="dash-daterange-day muted"></span>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ymd = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      let cls = 'dash-daterange-day';
+      if (draft.start && ymd === draft.start) cls += ' range-start';
+      if (draft.end && ymd === draft.end) cls += ' range-end';
+      if (draft.start && draft.end && ymd > draft.start && ymd < draft.end) cls += ' in-range';
+      cells += `<span class="${cls}" onclick="pickDateRangeDay_('${ymd}')">${d}</span>`;
+    }
+
+    return `
+      <div class="dash-daterange-weekdays">${WEEKDAY_LABELS.map(w => `<span>${w[0]}</span>`).join('')}</div>
+      <div class="dash-daterange-days">${cells}</div>
+    `;
+  }
+
+  function renderDateRangePickerPanel_() {
+    const panel = document.getElementById('dashDateRangePanel');
+    if (!panel) return;
+    const draft = window._dpDraft;
+    const m1 = window._dpViewMonth;
+    const m2 = new Date(m1.getFullYear(), m1.getMonth() + 1, 1);
+
+    panel.innerHTML = `
+      <div class="dash-daterange-presets">
+        ${DATE_PICKER_PRESETS_.map(p => `<button type="button" class="dash-daterange-preset-btn ${draft.activePreset === p ? 'active' : ''}" onclick="applyDateRangePreset_('${p}')">${p}</button>`).join('')}
+      </div>
+      <div class="dash-daterange-body">
+        <div class="dash-daterange-inputs">
+          <input type="text" readonly value="${fmtIdDate_(draft.start)}" placeholder="Tanggal mulai">
+          <input type="text" readonly value="${fmtIdDate_(draft.end)}" placeholder="Tanggal akhir">
+        </div>
+        <div class="dash-daterange-months">
+          <div class="dash-daterange-month">
+            <div class="dash-daterange-month-head">
+              <button type="button" onclick="shiftDateRangeMonth_(-1)">&larr;</button>
+              <span>${MONTH_LABELS[m1.getMonth()]} ${m1.getFullYear()}</span>
+              <span class="nav-spacer"></span>
+            </div>
+            ${renderMiniMonth_(m1, draft)}
+          </div>
+          <div class="dash-daterange-month">
+            <div class="dash-daterange-month-head">
+              <span class="nav-spacer"></span>
+              <span>${MONTH_LABELS[m2.getMonth()]} ${m2.getFullYear()}</span>
+              <button type="button" onclick="shiftDateRangeMonth_(1)">&rarr;</button>
+            </div>
+            ${renderMiniMonth_(m2, draft)}
+          </div>
+        </div>
+        <div class="dash-daterange-footer">
+          <button type="button" class="tab-btn" style="width:auto; padding:9px 18px; flex:none;" onclick="closeDateRangePicker_()">Batal</button>
+          <button type="button" class="btn-primary" style="width:auto; margin:0; padding:9px 22px;" onclick="dateRangePickerConfirm_()">Terapkan</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function shiftDateRangeMonth_(offset) {
+    window._dpViewMonth = new Date(window._dpViewMonth.getFullYear(), window._dpViewMonth.getMonth() + offset, 1);
+    renderDateRangePickerPanel_();
+  }
+
+  function pickDateRangeDay_(ymd) {
+    const draft = window._dpDraft;
+    draft.activePreset = 'Custom';
+    if (draft.selecting === 'start' || (draft.start && draft.end)) {
+      draft.start = ymd;
+      draft.end = null;
+      draft.selecting = 'end';
+    } else {
+      if (ymd < draft.start) {
+        draft.end = draft.start;
+        draft.start = ymd;
+      } else {
+        draft.end = ymd;
+      }
+      draft.selecting = 'start';
+    }
+    renderDateRangePickerPanel_();
+  }
+
+  function applyDateRangePreset_(name) {
+    const today = new Date();
+    let start, end;
+    if (name === 'Hari Ini') {
+      start = end = new Date();
+    } else if (name === 'Kemarin') {
+      start = end = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    } else if (name === '7 Hari Terakhir') {
+      end = new Date();
+      start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6);
+    } else if (name === '30 Hari Terakhir') {
+      end = new Date();
+      start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29);
+    } else if (name === 'Bulan Ini') {
+      start = new Date(today.getFullYear(), today.getMonth(), 1);
+      end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    } else if (name === 'Bulan Lalu') {
+      start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      end = new Date(today.getFullYear(), today.getMonth(), 0);
+    } else {
+      // 'Custom' - jangan ubah tanggal, cuma aktifkan mode pilih manual
+      window._dpDraft.activePreset = 'Custom';
+      renderDateRangePickerPanel_();
+      return;
+    }
+    window._dpDraft = { start: toYmd_(start), end: toYmd_(end), activePreset: name, selecting: 'start' };
+    window._dpViewMonth = new Date(start.getFullYear(), start.getMonth(), 1);
+    renderDateRangePickerPanel_();
+  }
+
+  function dateRangePickerConfirm_() {
+    const draft = window._dpDraft;
+    if (!draft.start) { showToast('Pilih tanggal dulu', 'err'); return; }
+    const finalEnd = draft.end || draft.start;
+    commitDateRange_(draft.start, finalEnd);
+    closeDateRangePicker_();
+    applyDashboardFilters();
   }
 
   /* ---------------- KPI, TREN, STATUS, ESTATE ---------------- */
@@ -113,7 +298,8 @@
       startDate: document.getElementById('dashStartDate').value,
       endDate: document.getElementById('dashEndDate').value,
       estate: base.estate,
-      status: base.status
+      status: base.status,
+      regional: base.regional
     };
 
     toggleLoading(true, 'Memuat dashboard...');
@@ -127,8 +313,10 @@
         renderKpiCards(res.summary);
         renderTrendChart(res.trend);
         renderStatusChart(res.statusBreakdown);
+        renderStatusConversion(res.statusConversion);
         renderEstateChart(res.estateBreakdown);
         renderEstateTable(res.estateBreakdown);
+        renderOriginMap(res.originByProvince, res.unmatchedOrigins);
       })
       .withFailureHandler(function(err) {
         toggleLoading(false);
@@ -156,9 +344,9 @@
     `).join('');
   }
 
-  function makeVerticalGradient_(ctx, colorStart, colorEnd) {
-    const h = ctx.canvas.clientHeight || 220;
-    const g = ctx.getContext('2d').createLinearGradient(0, 0, 0, h);
+  function makeVerticalGradient_(canvasEl, colorStart, colorEnd) {
+    const h = canvasEl.clientHeight || 220;
+    const g = canvasEl.getContext('2d').createLinearGradient(0, 0, 0, h);
     g.addColorStop(0, colorStart);
     g.addColorStop(1, colorEnd);
     return g;
@@ -166,35 +354,40 @@
 
   function renderTrendChart(trend) {
     const ctx = document.getElementById('trendChart');
-    if (!ctx || typeof Chart === 'undefined') return;
+    if (!ctx) return;
+    if (typeof Chart === 'undefined') { console.error('Chart.js belum termuat'); showToast('Gagal memuat library grafik', 'err'); return; }
     const list = trend || [];
     const labels = list.map(t => t.date.slice(5));
     const revenueData = list.map(t => t.revenue);
     const groupData = list.map(t => t.groups);
 
     if (trendChartInstance) trendChartInstance.destroy();
-    const barGradient = makeVerticalGradient_(ctx, 'rgba(31,93,78,0.95)', 'rgba(31,93,78,0.45)');
+    const barGradient = makeVerticalGradient_(ctx, 'rgba(127,88,54,0.95)', 'rgba(127,88,54,0.45)');
 
     trendChartInstance = new Chart(ctx, {
+      // PENTING: "type" di root WAJIB ada untuk mixed chart (bar + line).
+      // Tanpa ini Chart.js gagal render dan canvas akan tampak kosong.
+      type: 'bar',
       data: {
         labels: labels,
         datasets: [
           { type: 'bar', label: 'Revenue', data: revenueData, backgroundColor: barGradient, borderRadius: 8, maxBarThickness: 34, yAxisID: 'y' },
-          { type: 'line', label: 'Jumlah Grup', data: groupData, borderColor: '#E0A032', backgroundColor: '#E0A032', tension: 0.4, borderWidth: 2.5, pointRadius: 3, pointBackgroundColor: '#E0A032', pointBorderColor: '#fff', pointBorderWidth: 1.5, yAxisID: 'y1' }
+          { type: 'line', label: 'Jumlah Grup', data: groupData, borderColor: '#EC9C9D', backgroundColor: '#EC9C9D', tension: 0.4, borderWidth: 2.5, pointRadius: 3, pointBackgroundColor: '#EC9C9D', pointBorderColor: '#fff', pointBorderWidth: 1.5, yAxisID: 'y1' }
         ]
       },
       options: {
         responsive: true,
+        maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         scales: {
           x: { grid: { display: false } },
-          y: { beginAtZero: true, position: 'left', grid: { color: '#EFF2E9' }, ticks: { callback: v => formatRupiah(v) } },
+          y: { beginAtZero: true, position: 'left', grid: { color: '#F2CFCB' }, ticks: { callback: v => formatRupiah(v) } },
           y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { precision: 0 } }
         },
         plugins: {
           legend: { position: 'bottom' },
           tooltip: {
-            backgroundColor: '#123B31', padding: 10, cornerRadius: 8, titleFont: { weight: '700' },
+            backgroundColor: '#443025', padding: 10, cornerRadius: 8, titleFont: { weight: '700' },
             callbacks: {
               label: function(item) {
                 if (item.dataset.label === 'Revenue') return 'Revenue: ' + formatRupiah(item.raw);
@@ -209,11 +402,12 @@
 
   function renderStatusChart(statusBreakdown) {
     const ctx = document.getElementById('statusChart');
-    if (!ctx || typeof Chart === 'undefined') return;
+    if (!ctx) return;
+    if (typeof Chart === 'undefined') { console.error('Chart.js belum termuat'); return; }
     const list = statusBreakdown || [];
     const labels = list.map(s => s.status);
     const data = list.map(s => s.count);
-    const colors = labels.map(l => STATUS_COLORS[l] || '#8B978F');
+    const colors = labels.map(l => STATUS_COLORS[l] || '#82746D');
 
     if (statusChartInstance) statusChartInstance.destroy();
     if (list.length === 0) return;
@@ -222,18 +416,90 @@
       data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 3, borderColor: '#fff', hoverOffset: 6 }] },
       options: {
         responsive: true,
+        maintainAspectRatio: false,
         plugins: {
           legend: { position: 'bottom' },
-          tooltip: { backgroundColor: '#123B31', padding: 10, cornerRadius: 8 }
+          tooltip: { backgroundColor: '#443025', padding: 10, cornerRadius: 8 }
         },
         cutout: '68%'
       }
     });
   }
 
+  /**
+   * Tampilkan tabel konversi status (mis. "On Nego -> Booked: 12") berdasarkan
+   * data histori perubahan status dari server (sheet StatusHistory), plus
+   * kotak kecil breakdown per estate di bawahnya.
+   */
+  function renderStatusConversion(statusConversion) {
+    const container = document.getElementById('statusConversionContainer');
+    if (!container) return;
+
+    const list = (statusConversion && statusConversion.transitions) || [];
+    const byEstate = (statusConversion && statusConversion.byEstate) || [];
+
+    if (list.length === 0) {
+      container.innerHTML = '<p style="padding:16px 4px; color:var(--color-text-soft); font-size:12px; text-align:center;">Belum ada perubahan status yang tercatat pada rentang ini.</p>';
+      return;
+    }
+
+    const badge = (status) => {
+      const color = STATUS_COLORS[status] || '#82746D';
+      return `<span style="font-weight:700; color:${color};">${status}</span>`;
+    };
+
+    let html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
+    html += `<thead>
+              <tr style="border-bottom:2px solid var(--color-border);">
+                <th style="padding:8px 10px; text-align:left; color:var(--color-text-soft); font-size:11px; letter-spacing:.04em;">DARI</th>
+                <th style="padding:8px 10px; text-align:center; color:var(--color-text-soft); font-size:11px;"></th>
+                <th style="padding:8px 10px; text-align:left; color:var(--color-text-soft); font-size:11px; letter-spacing:.04em;">JADI</th>
+                <th style="padding:8px 10px; text-align:right; color:var(--color-text-soft); font-size:11px; letter-spacing:.04em;">JUMLAH ORDER</th>
+              </tr>
+            </thead><tbody>`;
+
+    list.forEach(t => {
+      html += `<tr style="border-bottom:1px solid var(--color-border);">
+        <td style="padding:10px;">${badge(t.from)}</td>
+        <td style="padding:10px; text-align:center; color:var(--color-text-soft);">→</td>
+        <td style="padding:10px;">${badge(t.to)}</td>
+        <td style="padding:10px; text-align:right; font-weight:700; color:var(--color-text);">${t.count}</td>
+      </tr>`;
+    });
+
+    html += '</tbody></table>';
+    html += `<div style="text-align:right; font-size:11px; color:var(--color-text-soft); margin-top:10px; padding-right:10px;">Total ${statusConversion.totalTransitions} perubahan status</div>`;
+
+    // Kotak kecil breakdown per estate
+    if (byEstate.length > 0) {
+      html += `<div style="font-size:11px; font-weight:700; color:var(--color-text-soft); letter-spacing:.04em; margin:18px 0 10px; padding-top:14px; border-top:1px solid var(--color-border);">PER ESTATE</div>`;
+      html += `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">`;
+      byEstate.forEach(e => {
+        html += `<div style="border:1px solid var(--color-border); border-radius:10px; padding:10px 12px; background:var(--color-surface);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span style="font-weight:700; font-size:12.5px; color:var(--color-text);">${e.estate}</span>
+            <span style="font-size:11px; color:var(--color-text-soft);">${e.total} order</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:3px;">
+            ${e.transitions.map(t => `
+              <div style="display:flex; justify-content:space-between; font-size:11.5px;">
+                <span>${badge(t.from)} → ${badge(t.to)}</span>
+                <span style="font-weight:700; color:var(--color-text);">${t.count}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+
+    container.innerHTML = html;
+  }
+
   function renderEstateChart(estateBreakdown) {
     const ctx = document.getElementById('estateChart');
-    if (!ctx || typeof Chart === 'undefined') return;
+    if (!ctx) return;
+    if (typeof Chart === 'undefined') { console.error('Chart.js belum termuat'); return; }
     const list = (estateBreakdown || []).slice(0, 10);
     const labels = list.map(e => e.estate);
     const data = list.map(e => e.revenue);
@@ -246,12 +512,13 @@
       options: {
         indexAxis: 'y',
         responsive: true,
+        maintainAspectRatio: false,
         plugins: {
           legend: { display: false },
-          tooltip: { backgroundColor: '#123B31', padding: 10, cornerRadius: 8, callbacks: { label: item => formatRupiah(item.raw) } }
+          tooltip: { backgroundColor: '#443025', padding: 10, cornerRadius: 8, callbacks: { label: item => formatRupiah(item.raw) } }
         },
         scales: {
-          x: { grid: { color: '#EFF2E9' }, ticks: { callback: v => formatRupiah(v) } },
+          x: { grid: { color: '#F2CFCB' }, ticks: { callback: v => formatRupiah(v) } },
           y: { grid: { display: false } }
         }
       }
@@ -276,6 +543,90 @@
       </tr>`;
     });
     container.innerHTML = html + '</tbody></table>';
+  }
+
+  /* ---------------- PETA ASAL GRUP ---------------- */
+
+  // Nama provinsi versi Indonesia buat tooltip (samain sama daftar di Code.gs)
+  const PROVINSI_NAMA_CLIENT_ = {'IDAC':'Aceh','IDSU':'Sumatera Utara','IDSB':'Sumatera Barat','IDRI':'Riau','IDJA':'Jambi','IDSS':'Sumatera Selatan','IDBE':'Bengkulu','IDLA':'Lampung','IDBB':'Bangka Belitung','IDKR':'Kepulauan Riau','IDJK':'DKI Jakarta','IDJB':'Jawa Barat','IDJT':'Jawa Tengah','IDYO':'DI Yogyakarta','IDJI':'Jawa Timur','IDBT':'Banten','IDBA':'Bali','IDNB':'Nusa Tenggara Barat','IDNT':'Nusa Tenggara Timur','IDKB':'Kalimantan Barat','IDKT':'Kalimantan Tengah','IDKS':'Kalimantan Selatan','IDKI':'Kalimantan Timur','IDKU':'Kalimantan Utara','IDSA':'Sulawesi Utara','IDST':'Sulawesi Tengah','IDSN':'Sulawesi Selatan','IDSG':'Sulawesi Tenggara','IDGO':'Gorontalo','IDSR':'Sulawesi Barat','IDMA':'Maluku','IDMU':'Maluku Utara','IDPB':'Papua Barat','IDPA':'Papua'};
+
+  function hexToRgb_(hex) {
+    hex = hex.replace('#', '');
+    return { r: parseInt(hex.substring(0,2),16), g: parseInt(hex.substring(2,4),16), b: parseInt(hex.substring(4,6),16) };
+  }
+  function mixColor_(hexA, hexB, t) {
+    const a = hexToRgb_(hexA), b = hexToRgb_(hexB);
+    const r = Math.round(a.r + (b.r - a.r) * t);
+    const g = Math.round(a.g + (b.g - a.g) * t);
+    const bl = Math.round(a.b + (b.b - a.b) * t);
+    return `rgb(${r},${g},${bl})`;
+  }
+
+  function renderOriginMap(originByProvince, unmatchedOrigins) {
+    const mapWrap = document.getElementById('originMapWrap');
+    const mapContainer = document.getElementById('originMapContainer');
+    const tooltip = document.getElementById('originMapTooltip');
+    const rankList = document.getElementById('originRankList');
+    const unmatchedBox = document.getElementById('originUnmatchedBox');
+    if (!mapContainer) return;
+
+    const list = originByProvince || [];
+    const dataMap = {};
+    let maxGroups = 0;
+    list.forEach(o => {
+      dataMap[o.provinceId] = o;
+      if (o.groups > maxGroups) maxGroups = o.groups;
+    });
+
+    const paths = mapContainer.querySelectorAll('.idmap-prov');
+    paths.forEach(path => {
+      const pid = path.getAttribute('id');
+      const data = dataMap[pid];
+      path.style.fill = (data && maxGroups) ? mixColor_('#ECE6E1', '#593E26', data.groups / maxGroups) : '#D0B9AB';
+
+      path.onmouseenter = function() {
+        const nama = PROVINSI_NAMA_CLIENT_[pid] || path.getAttribute('name') || pid;
+        tooltip.innerHTML = data
+          ? `<strong>${nama}</strong><br>${data.groups} grup &middot; ${formatRupiah(data.revenue)}`
+          : `<strong>${nama}</strong><br>Belum ada data`;
+        tooltip.classList.remove('hidden');
+      };
+      path.onmousemove = function(e) {
+        const rect = mapWrap.getBoundingClientRect();
+        tooltip.style.left = (e.clientX - rect.left + 12) + 'px';
+        tooltip.style.top = (e.clientY - rect.top + 12) + 'px';
+      };
+      path.onmouseleave = function() {
+        tooltip.classList.add('hidden');
+      };
+    });
+
+    if (rankList) {
+      if (list.length === 0) {
+        rankList.innerHTML = '<p style="font-size:12px; color:var(--color-text-soft);">Belum ada data kota asal.</p>';
+      } else {
+        rankList.innerHTML = list.slice(0, 10).map((o, idx) => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--color-border); font-size:12.5px;">
+            <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+              <span style="color:var(--color-text-soft); font-weight:700; width:16px; flex-shrink:0;">${idx + 1}</span>
+              <span style="font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${o.provinceName}</span>
+            </div>
+            <div style="text-align:right; flex-shrink:0; margin-left:8px; font-weight:700; color:var(--color-primary);">${o.groups} grup</div>
+          </div>
+        `).join('');
+      }
+    }
+
+    if (unmatchedBox) {
+      if (unmatchedOrigins && unmatchedOrigins.length > 0) {
+        const totalUnmatched = unmatchedOrigins.reduce((a, b) => a + b.count, 0);
+        const sample = unmatchedOrigins.slice(0, 8).map(u => `${u.kota} (${u.count})`).join(', ');
+        unmatchedBox.innerHTML = `⚠️ <strong>${totalUnmatched} order</strong> nama kota/kabupatennya belum kebaca ke peta (mungkin typo atau belum baku): ${sample}${unmatchedOrigins.length > 8 ? ', ...' : ''}`;
+        unmatchedBox.classList.remove('hidden');
+      } else {
+        unmatchedBox.classList.add('hidden');
+      }
+    }
   }
 
   /* ---------------- KALENDER KEDATANGAN GRUP ---------------- */
@@ -353,7 +704,7 @@
       if (hasData && maxRevenue > 0) {
         const ratio = Math.min(info.revenue / maxRevenue, 1);
         const alpha = 0.14 + ratio * 0.5; // 0.14 - 0.64, agar teks tetap terbaca
-        bgStyle = ` style="background: rgba(31,93,78,${alpha.toFixed(2)});"`;
+        bgStyle = ` style="background: rgba(127,88,54,${alpha.toFixed(2)});"`;
       }
 
       html += `<div class="dash-calendar-day ${hasData ? 'has-data' : ''} ${isToday ? 'today' : ''}"${bgStyle} ${hasData ? `onclick="showCalendarDayDetail('${ymd}')"` : ''}>
@@ -366,35 +717,90 @@
     window._calendarDaysData = daysData;
   }
 
+  /**
+   * MODAL DETAIL KALENDER - VERSI CAROUSEL
+   * Menampilkan SATU order per tampilan (tidak digabung), lengkap dengan
+   * semua detail (PIC, No Telp, Jam, Lembaga, Sumber, Pax, Revenue),
+   * dan bisa digeser next/prev antar order pada tanggal yang sama.
+   */
   function showCalendarDayDetail(ymd) {
     const info = (window._calendarDaysData || {})[ymd];
-    if (!info) return;
+    if (!info || !info.items || info.items.length === 0) return;
+
+    window._calDetailYmd = ymd;
+    window._calDetailItems = info.items;
+    window._calDetailIndex = 0;
+
     const titleEl = document.getElementById('calendarModalTitle');
     if (titleEl) titleEl.textContent = 'Kedatangan ' + ymd;
 
-    let body = `<div style="display:flex; gap:16px; margin-bottom:16px; font-size:13px;">
-      <div><strong>${info.groups}</strong> grup</div>
-      <div><strong>${info.pax}</strong> pax</div>
-      <div><strong>${formatRupiah(info.revenue)}</strong></div>
-    </div>`;
-    body += '<div style="display:flex; flex-direction:column; gap:8px;">';
-    (info.items || []).forEach(it => {
-      const color = STATUS_COLORS[it.status] || '#8B978F';
-      body += `<div style="border:1px solid var(--color-border); border-radius:8px; padding:10px;">
-        <div style="font-weight:700; font-size:13px;">${it.namaGrup}</div>
-        <div style="font-size:11px; color:var(--color-text-muted); margin-top:2px;">${it.estate} &middot; <span style="color:${color}; font-weight:700;">${it.status}</span></div>
-      </div>`;
-    });
-    body += '</div>';
-    const bodyEl = document.getElementById('calendarModalBody');
-    if (bodyEl) bodyEl.innerHTML = body;
+    renderCalendarDetailCard_();
 
     const modal = document.getElementById('calendarDayModal');
     if (modal) modal.classList.remove('hidden');
   }
 
+  function renderCalendarDetailCard_() {
+    const items = window._calDetailItems || [];
+    const idx = window._calDetailIndex || 0;
+    const it = items[idx];
+    if (!it) return;
+
+    const color = STATUS_COLORS[it.status] || '#82746D';
+
+    const body = `
+      <div style="font-size:11px;color:var(--color-text-soft);margin-bottom:10px;font-weight:700;">
+        Data ${idx + 1} dari ${items.length}
+      </div>
+      <div style="border:1px solid var(--color-border); border-radius:12px; padding:18px; background:var(--color-surface-alt);">
+        <div style="font-weight:800; font-size:15px; color:var(--color-text); margin-bottom:4px;">${it.namaGrup || '-'}</div>
+        <div style="font-size:12px; margin-bottom:14px;">
+          ${it.estate || '-'} &middot; <span style="color:${color}; font-weight:700;">${it.status || '-'}</span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:9px; font-size:12.5px;">
+          <div style="display:flex; justify-content:space-between; gap:10px;"><span style="color:var(--color-text-muted);">Nama PIC</span><strong style="text-align:right;">${it.namaPIC || '-'}</strong></div>
+          <div style="display:flex; justify-content:space-between; gap:10px;"><span style="color:var(--color-text-muted);">No Telp</span><strong style="text-align:right;">${it.noTelp || '-'}</strong></div>
+          <div style="display:flex; justify-content:space-between; gap:10px;"><span style="color:var(--color-text-muted);">Jam Kedatangan</span><strong style="text-align:right;">${it.jamKedatangan || '-'}</strong></div>
+          <div style="display:flex; justify-content:space-between; gap:10px;"><span style="color:var(--color-text-muted);">Lembaga</span><strong style="text-align:right;">${it.lembaga || '-'}</strong></div>
+          <div style="display:flex; justify-content:space-between; gap:10px;"><span style="color:var(--color-text-muted);">Sumber</span><strong style="text-align:right;">${it.sumber || '-'}</strong></div>
+          <div style="display:flex; justify-content:space-between; gap:10px; border-top:1px dashed var(--color-border); padding-top:9px; margin-top:2px;"><span style="color:var(--color-text-muted);">Jumlah Pax</span><strong style="text-align:right;">${it.pax || 0}</strong></div>
+          <div style="display:flex; justify-content:space-between; gap:10px;"><span style="color:var(--color-text-muted);">Revenue</span><strong style="text-align:right; color:var(--color-primary);">${formatRupiah(it.revenue)}</strong></div>
+        </div>
+      </div>
+      <div style="margin-top:16px;">
+        <div style="height:4px; background:var(--color-border); border-radius:999px; overflow:hidden; margin-bottom:12px;">
+          <div style="height:100%; width:${(((idx + 1) / items.length) * 100).toFixed(1)}%; background:var(--color-primary); border-radius:999px; transition:width .2s ease;"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <button type="button" onclick="calendarDetailPrev_()" class="tab-btn" style="width:auto; padding:9px 16px; flex:none; font-size:12px;" ${idx === 0 ? 'disabled' : ''}>&larr; Sebelumnya</button>
+          <button type="button" onclick="calendarDetailNext_()" class="tab-btn" style="width:auto; padding:9px 16px; flex:none; font-size:12px;" ${idx === items.length - 1 ? 'disabled' : ''}>Berikutnya &rarr;</button>
+        </div>
+      </div>
+    `;
+    const bodyEl = document.getElementById('calendarModalBody');
+    if (bodyEl) bodyEl.innerHTML = body;
+  }
+
+  function calendarDetailPrev_() {
+    if ((window._calDetailIndex || 0) > 0) {
+      window._calDetailIndex--;
+      renderCalendarDetailCard_();
+    }
+  }
+
+  function calendarDetailNext_() {
+    const items = window._calDetailItems || [];
+    if ((window._calDetailIndex || 0) < items.length - 1) {
+      window._calDetailIndex++;
+      renderCalendarDetailCard_();
+    }
+  }
+
   function closeCalendarDayModal() {
     const modal = document.getElementById('calendarDayModal');
     if (modal) modal.classList.add('hidden');
+    window._calDetailYmd = null;
+    window._calDetailItems = null;
+    window._calDetailIndex = 0;
   }
 </script>

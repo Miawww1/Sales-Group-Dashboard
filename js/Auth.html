@@ -113,8 +113,53 @@
     }
   }
 
-  function openForgotPassword() { document.getElementById('forgotModal').classList.remove('hidden'); }
-  function closeForgotPassword() { document.getElementById('forgotModal').classList.add('hidden'); }
+  /************************************************************
+   *  LUPA PASSWORD - Self Service (langsung timpa password di sheet)
+   ************************************************************/
+  function openForgotPassword() {
+    document.getElementById('forgotModal').classList.remove('hidden');
+    const emailInput = document.getElementById('forgotEmail');
+    if (emailInput) emailInput.value = document.getElementById('loginEmail')?.value || '';
+  }
+
+  function closeForgotPassword() {
+    document.getElementById('forgotModal').classList.add('hidden');
+    const resForm = document.getElementById('forgotResetForm');
+    if (resForm) resForm.reset();
+  }
+
+  const forgotResetForm = document.getElementById('forgotResetForm');
+  if (forgotResetForm) {
+    forgotResetForm.onsubmit = (e) => {
+      e.preventDefault();
+      const email = document.getElementById('forgotEmail').value.trim();
+      const newPass = document.getElementById('forgotNewPassword').value;
+      const confirmPass = document.getElementById('forgotConfirmPassword').value;
+
+      if (!email) return showToast('Masukkan email terlebih dahulu', 'err');
+      if (newPass.length < 6) return showToast('Password baru minimal 6 karakter', 'err');
+      if (newPass !== confirmPass) return showToast('Konfirmasi password tidak cocok', 'err');
+
+      toggleLoading(true, 'Mereset password...');
+      runServer()
+        .withSuccessHandler(res => {
+          toggleLoading(false);
+          if (res.success) {
+            showToast(res.message, 'ok');
+            closeForgotPassword();
+            const loginEmailInput = document.getElementById('loginEmail');
+            if (loginEmailInput) loginEmailInput.value = email;
+          } else {
+            showToast(res.message, 'err');
+          }
+        })
+        .withFailureHandler(err => {
+          toggleLoading(false);
+          showToast('Koneksi Gagal: ' + err, 'err');
+        })
+        .resetPasswordDirect(email, newPass);
+    };
+  }
 
   // Auto-Login
   window.addEventListener('load', () => {

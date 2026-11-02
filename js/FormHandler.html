@@ -1,6 +1,8 @@
 <script>/************************************************************
  *  FORMHANDLER.JS - Manajemen Form & Pengiriman Data
  *  (Full Version - Support Manager Edit Access)
+ *  FIX ANDROID: validasi manual (form pakai novalidate), guard
+ *  double-submit, loader tidak bisa macet kalau terjadi error.
  ************************************************************/
 
 /**
@@ -173,34 +175,84 @@ function populateLembagaOptions() {
 }
 
 /**
+ * VALIDASI MANUAL
+ * Form memakai atribut novalidate, jadi browser tidak lagi memblokir submit
+ * secara diam-diam (masalah umum di Android WebView / iframe Apps Script).
+ * Kita cek sendiri field wajib dan tampilkan pesan yang jelas.
+ */
+let isSubmitting_ = false;
+
+function validateInputForm_() {
+  const required = [
+    ['estate', 'Estate'],
+    ['status', 'Status'],
+    ['eventDate', 'Event Date'],
+    ['namaPIC', 'Nama PIC'],
+    ['noTelp', 'No Telp PIC'],
+    ['namaGrup', 'Nama Grup'],
+    ['lembaga', 'Lembaga'],
+    ['sumber', 'Sumber']
+  ];
+
+  for (const [id, label] of required) {
+    const el = document.getElementById(id);
+    if (!el || !String(el.value || '').trim()) {
+      showToast(label + ' wajib diisi', 'err');
+      if (el) {
+        try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+        try { el.focus({ preventScroll: true }); } catch (e) {}
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * HANDLE SUBMIT - SIMPAN / UPDATE
  */
 document.getElementById('inputForm').onsubmit = (e) => {
   e.preventDefault();
+
+  // Cegah klik ganda (di HP orang sering tap dua kali kalau respon lambat)
+  if (isSubmitting_) return;
+
   const S = getState();
 
+  if (!validateInputForm_()) return;
+
   if (!S.cart || S.cart.length === 0) {
-    showToast('Keranjang belanja masih kosong!', 'err');
+    showToast('Keranjang masih kosong! Klik "Tambah ke Keranjang" dulu.', 'err');
     return;
   }
 
+  isSubmitting_ = true;
   const isEdit = S.editMode;
-  const msgLoading = isEdit ? 'Memperbarui Data...' : 'Menyimpan Data...';
-  
-  toggleLoading(true, msgLoading);
+  toggleLoading(true, isEdit ? 'Memperbarui Data...' : 'Menyimpan Data...');
 
-  const formData = collectFormData();
+  // collectFormData dibungkus try/catch supaya kalau error, loader tidak macet
+  let formData;
+  try {
+    formData = collectFormData();
+  } catch (err) {
+    isSubmitting_ = false;
+    toggleLoading(false);
+    showToast('Gagal membaca form: ' + err.message, 'err');
+    return;
+  }
 
   const run = runServer().withSuccessHandler(res => {
+    isSubmitting_ = false;
     toggleLoading(false);
-    if (res.success) {
+    if (res && res.success) {
       showToast(res.message, 'ok');
       resetForm();
       if (typeof loadRevenueSummary === 'function') loadRevenueSummary(1);
     } else {
-      showToast(res.message, 'err');
+      showToast((res && res.message) || 'Gagal menyimpan data', 'err');
     }
   }).withFailureHandler(err => {
+    isSubmitting_ = false;
     toggleLoading(false);
     showToast('Error Server: ' + err, 'err');
   });
@@ -252,6 +304,7 @@ function resetForm() {
   S.selectedTravelAgent = null;
   S.editMode = false;
   S.editOrderId = null;
+  isSubmitting_ = false;
 
   if (typeof renderCart === 'function') renderCart();
   if (typeof updatePaymentSummaryUI === 'function') updatePaymentSummaryUI();

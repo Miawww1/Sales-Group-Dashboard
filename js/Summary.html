@@ -7,33 +7,10 @@
 let currentRevPage = 1;
 
 /**
- * Inisialisasi tanggal default (14 hari terakhir)
- */
-function initRevenueDates() {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(end.getDate() - 14); 
-
-  const formatDate = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  const startInput = document.getElementById('revStartDate');
-  const endInput = document.getElementById('revEndDate');
-  
-  if (startInput && !startInput.value) startInput.value = formatDate(start);
-  if (endInput && !endInput.value) endInput.value = formatDate(end);
-}
-
-/**
  * Berpindah ke halaman Revenue Summary
  */
 function openRevenuePage() {
   switchPage('revenuePage');
-  initRevenueDates(); 
   loadRevenueSummary(1);
 }
 
@@ -52,8 +29,6 @@ function loadRevenueSummary(page = 1) {
   if (!user?.email) return;
 
   currentRevPage = page;
-  const startDate = document.getElementById('revStartDate').value;
-  const endDate = document.getElementById('revEndDate').value;
   const searchQuery = document.getElementById('summarySearch').value;
 
   toggleLoading(true, 'Mengambil data transaksi...');
@@ -70,9 +45,7 @@ function loadRevenueSummary(page = 1) {
       showToast('Gagal memuat data: ' + err, 'err');
     })
     .getRevenueSummaryForUser(user.email, {
-      startDate: startDate, 
-      endDate: endDate, 
-      page: page, 
+      page: page,
       pageSize: 50,
       search: searchQuery
     });
